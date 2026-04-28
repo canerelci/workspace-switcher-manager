@@ -103,6 +103,6 @@
 .workspace-switcher-custom.wsm-popup-workspace-thumbnails .ws-switcher-box,
 .workspace-switcher-custom.wsm-popup-workspace-thumbnails .ws-switcher-active {
   height: auto;
-  /* Must fit ~72px preview + labels; 52px bins clip thumbnails to invisible */
-  min-height: 140px;
+  /* Room for preview + boosted label strip (extension.js WSM_THUMB_* constants). */
+  min-height: 252px;
 }

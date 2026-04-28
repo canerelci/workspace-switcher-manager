@@ -37,6 +37,12 @@ const wsPopupMode = {
     DEFAULT: 2,
 };
 
+/** Min tile size (px, before popupScale) so thumbnails can fill the card; paired with CSS min-height. */
+const WSM_THUMB_TILE_MIN_PX = 252;
+
+/** Bottom strip reserved for workspace labels when thumbnails are shown (boosted font sizes). */
+const WSM_THUMB_LABEL_RESERVE_PX = 92;
+
 const POINTER_SELECT_PRESETS = [
     ['<Super>w'],
 ];
@@ -1240,7 +1246,7 @@ const WorkspaceSwitcherPopupCustom = {
             const root = new St.BoxLayout({
                 vertical: true,
                 x_align: Clutter.ActorAlign.CENTER,
-                y_align: Clutter.ActorAlign.CENTER,
+                y_align: Clutter.ActorAlign.START,
             });
             if (thumbClip)
                 root.add_child(thumbClip);
@@ -1274,11 +1280,11 @@ const WorkspaceSwitcherPopupCustom = {
             tileW = Math.round(bh * geoAspect);
         }
 
-        /* Thumb must share one scale with WorkspaceThumbnail.set_scale using THIS monitor's work area (picker matches _createWorkspaceThumbnailClip). */
-        const labelReservePx = 62;
-        const gapPx = 6;
-        const innerW = Math.max(48, Math.floor(tileW - 16));
-        const innerH = Math.max(40, Math.floor(tileH - labelReservePx - gapPx));
+        /* Thumb must share one scale with WorkspaceThumbnail.setScale using THIS monitor's work area (picker matches _createWorkspaceThumbnailClip). */
+        const labelReservePx = WSM_THUMB_LABEL_RESERVE_PX;
+        const gapPx = 8;
+        const innerW = Math.max(48, Math.floor(tileW - 12));
+        const innerH = Math.max(48, Math.floor(tileH - labelReservePx - gapPx));
 
         let scale = Math.min(innerW / wa.width, innerH / wa.height);
         /* Extremely small scales (~0.035) often produce blank clones on real drivers */
@@ -1410,9 +1416,12 @@ const WorkspaceSwitcherPopupCustom = {
         if (!(showIndex || showName || showApp || showTitle))
             return null;
 
+        const thumbLabels = opt.get('popupWorkspaceThumbnails');
+        const labelFsBoost = thumbLabels ? 1.48 : 1;
+
         if (showIndex) {
             const text = `${wsIndex + 1}`;
-            const fontSize = this._popScale * this._indexScale * this._list._fitToScreenScale;
+            const fontSize = this._popScale * this._indexScale * this._list._fitToScreenScale * labelFsBoost;
             indexLabel = new St.Label({
                 x_align: Clutter.ActorAlign.CENTER,
                 y_align: Clutter.ActorAlign.CENTER,
@@ -1447,7 +1456,7 @@ const WorkspaceSwitcherPopupCustom = {
 
         if (showTitle) {
             const winTitle = this._getWinTitle(wsIndex);
-            const fontSize = this._popScale * this._fontScale * 0.8 * this._list._fitToScreenScale;
+            const fontSize = this._popScale * this._fontScale * 0.8 * this._list._fitToScreenScale * labelFsBoost;
             if (winTitle && !text.split('\n').includes(winTitle)) {
                 titleLabel = new St.Label({
                     x_align: Clutter.ActorAlign.CENTER,
@@ -1464,7 +1473,7 @@ const WorkspaceSwitcherPopupCustom = {
             }
         }
 
-        let fontSize = this._popScale * this._fontScale * this._list._fitToScreenScale;
+        let fontSize = this._popScale * this._fontScale * this._list._fitToScreenScale * labelFsBoost;
         // if text is ordered but not delivered (no app name, no ws name) but ws index will be shown,
         // add an empty line to avoid index jumping during switching (at least when app name wrapping is disabled)
         if (this._popupMode === wsPopupMode.ACTIVE && (showName || showApp || showTitle) && showIndex && !text)
@@ -1682,12 +1691,18 @@ class WorkspaceSwitcherPopupList extends St.Widget {
 
     _getSizeForOppositeOrientation() {
         let workArea = _wsmWorkAreaForPopupSizing();
+        const thumbs = this.has_style_class_name('wsm-popup-workspace-thumbnails');
+        const minSide = Math.round(WSM_THUMB_TILE_MIN_PX * (this._popScale ?? 1));
 
         if (this._orientation === Clutter.Orientation.HORIZONTAL) {  // width scale option application
             this._childHeight = Math.round(this._childWidth * workArea.height / workArea.width / this._customWidthScale);
+            if (thumbs)
+                this._childHeight = Math.max(this._childHeight, minSide);
             return [this._childHeight, this._childHeight];
         } else {
             this._childWidth = Math.round(this._childHeight * workArea.width / workArea.height * this._customWidthScale);
+            if (thumbs)
+                this._childWidth = Math.max(this._childWidth, minSide);
             return [this._childWidth, this._childWidth];
         }
     }
