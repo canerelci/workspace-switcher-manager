@@ -89,3 +89,20 @@
   color: #e8e8e8;
   max-width: 380px;
 }
+
+.wsm-workspace-thumbnail-clip {
+  border-radius: 6px;
+}
+
+/* WorkspaceThumbnail uses style_class workspace-thumbnail; theme/overview rules can hide clones outside Overview */
+.workspace-switcher-custom .workspace-thumbnail {
+  opacity: 255;
+}
+
+/* Fixed pixel heights on tiles clip workspace thumbnails; grow tiles when previews are on. */
+.workspace-switcher-custom.wsm-popup-workspace-thumbnails .ws-switcher-box,
+.workspace-switcher-custom.wsm-popup-workspace-thumbnails .ws-switcher-active {
+  height: auto;
+  /* Must fit ~72px preview + labels; 52px bins clip thumbnails to invisible */
+  min-height: 140px;
+}

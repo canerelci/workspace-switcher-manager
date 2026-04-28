@@ -459,6 +459,21 @@ function _getPopupOptionList(itemFactory) {
 function _getContentOptionList(itemFactory) {
     const optionList = [];
 
+    /* Section header first — getAdwPage() creates Adw.PreferencesGroup only after a title-only row. */
+    optionList.push(
+        itemFactory.getRowWidget(
+            _('Workspace previews')
+        )
+    );
+    optionList.push(
+        itemFactory.getRowWidget(
+            _('Workspace thumbnails'),
+            _('Show a live preview of each workspace inside its indicator box (custom pop-up only). May increase GPU use slightly.'),
+            itemFactory.newSwitch(),
+            'popupWorkspaceThumbnails'
+        )
+    );
+
     optionList.push(
         itemFactory.getRowWidget(
             _('Pop-up Active Workspace Indicator Content')

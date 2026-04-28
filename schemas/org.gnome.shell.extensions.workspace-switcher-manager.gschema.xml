@@ -147,6 +147,12 @@
       <description>Glow color around the active workspace tile when hovered (pointer-select session).</description>
     </key>
 
+    <key type="b" name="popup-workspace-thumbnails">
+      <default>false</default>
+      <summary>Show workspace thumbnails in indicator boxes</summary>
+      <description>When enabled, each workspace tile shows a scaled live preview of that workspace (custom pop-up layout).</description>
+    </key>
+
 
     <key type="b" name="active-show-ws-index">
       <default>true</default>
@@ -200,6 +206,7 @@
         'popupInactiveHoverBgColor': 'rgba(255,255,255,0.22)',
         'popupInactiveHoverBorderColor': 'rgba(255,255,255,0.72)',
         'popupActiveHoverGlowColor': 'rgba(255,255,255,0.55)',
+        'popupWorkspaceThumbnails': 'false',
         'activeShowWsIndex': 'true',
         'activeShowWsName': 'false',
         'activeShowAppName': 'true',
@@ -237,6 +244,7 @@
         'popupInactiveHoverBgColor': 'rgba(255,255,255,0.22)',
         'popupInactiveHoverBorderColor': 'rgba(255,255,255,0.72)',
         'popupActiveHoverGlowColor': 'rgba(255,255,255,0.55)',
+        'popupWorkspaceThumbnails': 'false',
         'activeShowWsIndex': 'false',
         'activeShowWsName': 'false',
         'activeShowAppName': 'true',
@@ -274,6 +282,7 @@
         'popupInactiveHoverBgColor': 'rgba(255,255,255,0.22)',
         'popupInactiveHoverBorderColor': 'rgba(255,255,255,0.72)',
         'popupActiveHoverGlowColor': 'rgba(255,255,255,0.55)',
+        'popupWorkspaceThumbnails': 'false',
         'activeShowWsIndex': 'false',
         'activeShowWsName': 'false',
         'activeShowAppName': 'false',
@@ -311,6 +320,7 @@
         'popupInactiveHoverBgColor': 'rgba(255,255,255,0.22)',
         'popupInactiveHoverBorderColor': 'rgba(255,255,255,0.72)',
         'popupActiveHoverGlowColor': 'rgba(255,255,255,0.55)',
+        'popupWorkspaceThumbnails': 'false',
         'activeShowWsIndex': 'true',
         'activeShowWsName': 'false',
         'activeShowAppName': 'true',
@@ -348,6 +358,7 @@
         'popupInactiveHoverBgColor': 'rgba(255,255,255,0.22)',
         'popupInactiveHoverBorderColor': 'rgba(255,255,255,0.72)',
         'popupActiveHoverGlowColor': 'rgba(255,255,255,0.55)',
+        'popupWorkspaceThumbnails': 'false',
         'activeShowWsIndex': 'true',
         'activeShowWsName': 'false',
         'activeShowAppName': 'false',

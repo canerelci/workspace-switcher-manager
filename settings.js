@@ -69,6 +69,7 @@ export const Options = class Options {
             popupInactiveHoverBgColor: ['string', 'popup-inactive-hover-bg-color'],
             popupInactiveHoverBorderColor: ['string', 'popup-inactive-hover-border-color'],
             popupActiveHoverGlowColor: ['string', 'popup-active-hover-glow-color'],
+            popupWorkspaceThumbnails: ['boolean', 'popup-workspace-thumbnails'],
             activeShowWsIndex: ['boolean', 'active-show-ws-index'],
             activeShowWsName: ['boolean', 'active-show-ws-name'],
             activeShowAppName: ['boolean', 'active-show-app-name'],

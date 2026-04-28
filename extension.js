@@ -41,6 +41,93 @@ const POINTER_SELECT_PRESETS = [
     ['<Super>w'],
 ];
 
+/** Pointer-select diagnostics → journal: `journalctl --user -f -g WSM-pointer` (no ripgrep needed) */
+function _wsmPointerJournal(msg) {
+    log(`[WSM-pointer] ${msg}`);
+}
+
+function _wsmPointerJournalVerbose(msg) {
+    if (opt?.get('pointerWorkspaceSelectDebugOverlay'))
+        _wsmPointerJournal(msg);
+}
+
+/** Writes to journal (`log`), stderr (`print`), and `$TMPDIR/wsm-extension.log`. */
+function _wsmDiagLog(msg) {
+    const line = `[WSM] ${msg}`;
+    log(line);
+    print(`${line}\n`);
+    try {
+        const path = GLib.build_filenamev([GLib.get_tmp_dir(), 'wsm-extension.log']);
+        const file = Gio.File.new_for_path(path);
+        const stream = file.append_to(Gio.FileCreateFlags.NONE, null);
+        const stamp = GLib.DateTime.new_now_local().format_iso8601();
+        const bytes = new GLib.Bytes(`${stamp} ${line}\n`);
+        stream.write_bytes(bytes, null);
+        stream.close(null);
+    } catch (e) {
+        log(`[WSM] diag file write failed: ${e.message}`);
+    }
+}
+
+/** Logs when Content → Workspace thumbnails is enabled (journal: `journalctl -f | grep WSM-thumb`; try without `--user` if empty). */
+function _wsmThumbJournal(msg) {
+    if (opt?.get('popupWorkspaceThumbnails'))
+        _wsmDiagLog(`thumb: ${msg}`);
+}
+
+/** Improve clone painting when embedding Shell WorkspaceThumbnail outside Overview (theme/compositor). */
+function _wsmThumbnailPresentationHints(actor) {
+    const OR = Clutter.OffscreenRedirect;
+    try {
+        if (OR?.NEVER !== undefined)
+            actor.offscreen_redirect = OR.NEVER;
+        else if (OR?.DISABLED !== undefined)
+            actor.offscreen_redirect = OR.DISABLED;
+    } catch (e) {
+        /* ignore */
+    }
+}
+
+/** Same ordering as Shell Overview `_onRestacked` (overview.js) for WorkspaceThumbnail.syncStacking(). */
+function _wsmBuildWindowStackIndices() {
+    const stack = global.get_window_actors();
+    const stackIndices = {};
+    for (let i = 0; i < stack.length; i++) {
+        const mw = stack[i].get_meta_window();
+        if (mw)
+            stackIndices[mw.get_stable_sequence()] = i;
+    }
+    return stackIndices;
+}
+
+/**
+ * WorkspaceThumbnail only draws windows on one monitor; pick the monitor with the most
+ * taskbar-visible windows on this workspace (secondary monitor no longer yields empty tiles).
+ */
+function _wsmPickMonitorIndexForThumbnail(metaWorkspace, fallbackMonIdx) {
+    const nMon = global.display.get_n_monitors();
+    let bestMon = fallbackMonIdx;
+    let bestScore = -1;
+    for (let m = 0; m < nMon; m++) {
+        let score = 0;
+        for (const actor of global.get_window_actors()) {
+            const win = actor.meta_window;
+            if (!win || !win.located_on_workspace(metaWorkspace))
+                continue;
+            if (win.get_monitor() !== m)
+                continue;
+            if (win.skip_taskbar || !win.showing_on_its_workspace())
+                continue;
+            score++;
+        }
+        if (score > bestScore) {
+            bestScore = score;
+            bestMon = m;
+        }
+    }
+    return bestMon;
+}
+
 /** Applied by pointer-hover timer; stylesheet :hover is unreliable under modal. */
 const WSM_POINTER_HOVER_CLASS = 'wsm-pointer-hover';
 
@@ -551,7 +638,7 @@ function _wsmWorkAreaForPopupSizing() {
 export default class WSM extends Extension {
     enable() {
         this._original_getNeighbor = Meta.Workspace.prototype.get_neighbor;
-        this._defaultOrientationVertical = global.workspaceManager.layout_rows === -1;
+        this._defaultOrientationVertical = global.workspace_manager.layout_rows === -1;
 
         // if VW extension enabled, disable this option in WSM
         this._wsOrientationEnabled = !Util.getEnabledExtensions('vertical-workspaces').length;
@@ -569,6 +656,8 @@ export default class WSM extends Extension {
 
         this._syncPointerPresetToAccelerator();
         this._updatePointerSelectKeybinding();
+
+        _wsmDiagLog(`enabled uuid=${this.metadata.uuid} popupMode=${opt.get('popupMode')} popupVisibility=${opt.get('popupVisibility')} thumbs=${opt.get('popupWorkspaceThumbnails')}`);
 
         console.debug(`${this.metadata.name}: enabled`);
     }
@@ -682,7 +771,7 @@ export default class WSM extends Extension {
 
     _showPopupForPrefs() {
         // if user is currently customizing the popup, show the popup on the screen
-        const wsIndex = global.workspaceManager.get_active_workspace_index();
+        const wsIndex = global.workspace_manager.get_active_workspace_index();
         if (Main.wm._workspaceSwitcherPopup !== null) {
             Main.wm._workspaceSwitcherPopup.destroy();
             Main.wm._workspaceSwitcherPopup = null;
@@ -753,7 +842,10 @@ export default class WSM extends Extension {
 
     _updatePointerSelectKeybinding() {
         Main.wm.removeKeybinding('pointer-workspace-select-accelerator');
-        if (!opt.get('pointerWorkspaceSelectEnabled'))
+        const enabled = opt.get('pointerWorkspaceSelectEnabled');
+        const accels = this.getSettings().get_strv('pointer-workspace-select-accelerator');
+        _wsmDiagLog(`pointer keybinding enabled=${enabled} accelerator=${accels.join(', ')}`);
+        if (!enabled)
             return;
         Main.wm.addKeybinding(
             'pointer-workspace-select-accelerator',
@@ -762,25 +854,39 @@ export default class WSM extends Extension {
             Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW,
             () => this._onPointerSelectActivate()
         );
+        _wsmDiagLog('pointer keybinding addKeybinding registered');
     }
 
     _onPointerSelectActivate() {
-        if (!opt.get('pointerWorkspaceSelectEnabled'))
-            return;
-        const wsIndex = global.workspaceManager.get_active_workspace_index();
-        if (Main.wm._workspaceSwitcherPopup) {
-            Main.wm._workspaceSwitcherPopup.destroy();
-            Main.wm._workspaceSwitcherPopup = null;
-        }
-        globalThis._wsmPointerSelectOpening = true;
         try {
-            Main.wm._workspaceSwitcherPopup = new WorkspaceSwitcherPopup.WorkspaceSwitcherPopup();
-            Main.wm._workspaceSwitcherPopup.connect('destroy', () => {
+            _wsmPointerJournalVerbose('shortcut invoked');
+            if (!opt.get('pointerWorkspaceSelectEnabled')) {
+                _wsmPointerJournal('shortcut ignored: pointer-workspace-select-enabled is false');
+                return;
+            }
+            const wsIndex = global.workspace_manager.get_active_workspace_index();
+            _wsmPointerJournalVerbose(`active workspace index=${wsIndex}`);
+            if (Main.wm._workspaceSwitcherPopup) {
+                Main.wm._workspaceSwitcherPopup.destroy();
                 Main.wm._workspaceSwitcherPopup = null;
-            });
-            Main.wm._workspaceSwitcherPopup.display(wsIndex);
-        } finally {
+                _wsmPointerJournalVerbose('destroyed existing workspace switcher popup');
+            }
+            globalThis._wsmPointerSelectOpening = true;
+            try {
+                Main.wm._workspaceSwitcherPopup = new WorkspaceSwitcherPopup.WorkspaceSwitcherPopup();
+                Main.wm._workspaceSwitcherPopup.connect('destroy', () => {
+                    Main.wm._workspaceSwitcherPopup = null;
+                });
+                Main.wm._workspaceSwitcherPopup.display(wsIndex);
+                _wsmPointerJournalVerbose('popup display() finished');
+            } finally {
+                globalThis._wsmPointerSelectOpening = false;
+            }
+        } catch (e) {
             globalThis._wsmPointerSelectOpening = false;
+            _wsmPointerJournal(`ERROR in pointer-select: ${e?.message ?? e}`);
+            if (e?.stack)
+                _wsmPointerJournal(e.stack);
         }
     }
 }
@@ -943,6 +1049,11 @@ const WorkspaceSwitcherPopupCustom = {
 
         this._list.destroy_all_children();
 
+        if (opt.get('popupWorkspaceThumbnails'))
+            this._list.add_style_class_name('wsm-popup-workspace-thumbnails');
+        else
+            this._list.remove_style_class_name('wsm-popup-workspace-thumbnails');
+
         for (let i = 0; i < workspaceManager.n_workspaces; i++) {
             let indicator = null;
 
@@ -1011,6 +1122,10 @@ const WorkspaceSwitcherPopupCustom = {
         if (this._timeoutId)
             GLib.source_remove(this._timeoutId);
         this._timeoutId = 0;
+        if (this._wsmThumbDeferTickId) {
+            GLib.source_remove(this._wsmThumbDeferTickId);
+            this._wsmThumbDeferTickId = 0;
+        }
 
         let workspaceManager = global.workspace_manager;
         for (let i = 0; i < this._workspaceManagerSignals.length; i++)
@@ -1072,17 +1187,176 @@ const WorkspaceSwitcherPopupCustom = {
 
     _addLabels() {
         const children = this._list.get_children();
-        for (let i = 0; i < children.length; i++) {
-            const label = this._getCustomLabel(children[i]._wsIndex);
-            if (label) {
-                children[i].set_child(label);
-                /* Labels stay non-reactive so picking hits the St.Bin tile (CSS :hover on
-                   .ws-switcher-*). Reactive children would steal hover with no matching styles.
-                   Pointer-select relies on modal + reactive fullscreen widget to absorb clicks
-                   outside tiles, not on reactive labels. */
-                _wsmMarkSubtreeNonReactive(label);
+        const thumbsEnabled = opt.get('popupWorkspaceThumbnails');
+        const list = this._list;
+        /* Until WorkspaceSwitcherPopupList has allocated tile sizes, thumbnails would be ~28px tall and bins (~52px CSS) clip them away */
+        const layoutReady = list._childWidth > 0 && list._childHeight > 0;
+
+        _wsmDiagLog(`_addLabels thumbsEnabled=${thumbsEnabled} layoutReady=${layoutReady} tiles=${children.length} ` +
+            `fit=${list._fitToScreenScale} childW=${list._childWidth} childH=${list._childHeight} boxH=${this._boxHeight}`);
+
+        if (thumbsEnabled && !layoutReady) {
+            for (let i = 0; i < children.length; i++) {
+                const labelBox = this._getCustomLabel(children[i]._wsIndex);
+                if (labelBox) {
+                    children[i].set_child(labelBox);
+                    _wsmMarkSubtreeNonReactive(labelBox);
+                }
             }
+            if (!this._wsmThumbDeferTickId) {
+                this._wsmThumbDeferTickId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 32, () => {
+                    this._wsmThumbDeferTickId = 0;
+                    if (Main.wm._workspaceSwitcherPopup === this && opt.get('popupWorkspaceThumbnails'))
+                        this._addLabels();
+                    return GLib.SOURCE_REMOVE;
+                });
+                GLib.Source.set_name_by_id(this._wsmThumbDeferTickId, '[WSM] thumbnails wait for tile allocation');
+            }
+            return;
         }
+
+        for (let i = 0; i < children.length; i++) {
+            const wsIdx = children[i]._wsIndex;
+            const labelBox = this._getCustomLabel(wsIdx);
+
+            if (!thumbsEnabled) {
+                if (labelBox) {
+                    children[i].set_child(labelBox);
+                    /* Labels stay non-reactive so picking hits the St.Bin tile (CSS :hover on
+                       .ws-switcher-*). Reactive children would steal hover with no matching styles.
+                       Pointer-select relies on modal + reactive fullscreen widget to absorb clicks
+                       outside tiles, not on reactive labels. */
+                    _wsmMarkSubtreeNonReactive(labelBox);
+                }
+                continue;
+            }
+
+            const [thumbW, thumbH] = this._getThumbnailClipDimensions(wsIdx);
+            const thumbClip = this._createWorkspaceThumbnailClip(wsIdx, thumbW, thumbH);
+
+            if (!thumbClip && !labelBox)
+                continue;
+
+            const root = new St.BoxLayout({
+                vertical: true,
+                x_align: Clutter.ActorAlign.CENTER,
+                y_align: Clutter.ActorAlign.CENTER,
+            });
+            if (thumbClip)
+                root.add_child(thumbClip);
+            if (labelBox) {
+                if (thumbClip)
+                    labelBox.margin_top = Math.max(2, Math.floor(4 * this._popScale));
+                root.add_child(labelBox);
+            }
+
+            children[i].set_child(root);
+            _wsmMarkSubtreeNonReactive(root);
+        }
+    },
+
+    _getThumbnailClipDimensions(wsIndex) {
+        const ws = global.workspace_manager.get_workspace_by_index(wsIndex);
+        const fallbackMon = this._monitorOption === 0
+            ? Main.layoutManager.primaryIndex
+            : global.display.get_current_monitor();
+        const monIdx = ws ? _wsmPickMonitorIndexForThumbnail(ws, fallbackMon) : fallbackMon;
+        const wa = Main.layoutManager.getWorkAreaForMonitor(monIdx);
+
+        const list = this._list;
+        let tileW = list._childWidth;
+        let tileH = list._childHeight;
+
+        if (!tileW || !tileH) {
+            const geoAspect = wa.width / wa.height * list._customWidthScale;
+            const bh = this._boxHeight || Math.round(80 * this._popScale);
+            tileH = bh;
+            tileW = Math.round(bh * geoAspect);
+        }
+
+        /* Thumb must share one scale with WorkspaceThumbnail.set_scale using THIS monitor's work area (picker matches _createWorkspaceThumbnailClip). */
+        const labelReservePx = 62;
+        const gapPx = 6;
+        const innerW = Math.max(48, Math.floor(tileW - 16));
+        const innerH = Math.max(40, Math.floor(tileH - labelReservePx - gapPx));
+
+        let scale = Math.min(innerW / wa.width, innerH / wa.height);
+        /* Extremely small scales (~0.035) often produce blank clones on real drivers */
+        scale = Math.max(scale, 0.052);
+
+        let thumbW = Math.floor(wa.width * scale);
+        let thumbH = Math.floor(wa.height * scale);
+        thumbW = Math.min(thumbW, innerW);
+        thumbH = Math.min(thumbH, innerH);
+
+        return [thumbW, thumbH];
+    },
+
+    _createWorkspaceThumbnailClip(wsIndex, thumbW, thumbH) {
+        const ws = global.workspace_manager.get_workspace_by_index(wsIndex);
+        if (!ws)
+            return null;
+
+        const fallbackMon = this._monitorOption === 0
+            ? Main.layoutManager.primaryIndex
+            : global.display.get_current_monitor();
+        const monIdx = _wsmPickMonitorIndexForThumbnail(ws, fallbackMon);
+
+        const thumbnail = new WorkspaceThumbnail(ws, monIdx);
+        _wsmThumbnailPresentationHints(thumbnail);
+
+        const wa = Main.layoutManager.getWorkAreaForMonitor(monIdx);
+        const scale = Math.min(thumbW / wa.width, thumbH / wa.height);
+
+        /* Same as overview ThumbnailsBox: scale the internal viewport, not the root actor. */
+        thumbnail.setScale(scale, scale);
+
+        const dispW = Math.round(wa.width * scale);
+        const dispH = Math.round(wa.height * scale);
+        const ox = Math.floor((thumbW - dispW) / 2);
+        const oy = Math.floor((thumbH - dispH) / 2);
+
+        thumbnail.opacity = 255;
+        thumbnail.show();
+
+        try {
+            thumbnail.syncStacking(_wsmBuildWindowStackIndices());
+        } catch (e) {
+            log(`[WSM-thumb] syncStacking: ${e?.message ?? e}`);
+        }
+
+        const nClones = thumbnail._windows?.length ?? 0;
+        _wsmThumbJournal(`ws=${wsIndex} mon=${monIdx} wa=${wa.width}x${wa.height} thumb=${thumbW}x${thumbH} scale=${scale.toFixed(4)} clones=${nClones}`);
+
+        const clip = new WorkspaceSwitcherManagerThumbnailClip();
+        _wsmThumbnailPresentationHints(clip);
+
+        const inner = new Clutter.ActorBox();
+        inner.x1 = ox;
+        inner.y1 = oy;
+        inner.x2 = ox + dispW;
+        inner.y2 = oy + dispH;
+        clip.setThumbnailInnerBox(inner);
+
+        clip.set_size(thumbW, thumbH);
+        clip.add_child(thumbnail);
+        clip.show();
+
+        const idleId = GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+            if (!thumbnail.get_stage())
+                return GLib.SOURCE_REMOVE;
+            try {
+                thumbnail.syncStacking(_wsmBuildWindowStackIndices());
+            } catch (e) {
+                log(`[WSM-thumb] idle syncStacking: ${e?.message ?? e}`);
+            }
+            clip.queue_relayout();
+            thumbnail.queue_redraw();
+            return GLib.SOURCE_REMOVE;
+        });
+        GLib.Source.set_name_by_id(idleId, '[WSM] thumbnail idle refresh');
+
+        return clip;
     },
 
     _setSpacing() {
@@ -1091,16 +1365,6 @@ const WorkspaceSwitcherPopupCustom = {
             spacing = Math.floor(10 * this._popScale);
             this._list._listSpacing = Math.floor(spacing * this._spacingScale);
         }
-    },
-
-    _getWorkspaceThumbnail(index) {
-        let ws = global.workspaceManager.get_workspace_by_index(index);
-        let thumbnail = new WorkspaceThumbnail(ws, index);
-        const screenHeight = global.display.get_monitor_geometry(0).height;
-        const scale = this._boxHeight / screenHeight * 2;
-        thumbnail.get_children().forEach(w => w.set_scale(scale, scale));
-        thumbnail._contents.set_position(0, 0);
-        return thumbnail;
     },
 
     _setPopupPosition() {
@@ -1269,7 +1533,7 @@ const WorkspaceSwitcherPopupCustom = {
     },
 
     _getCurrentWsWin(wsIndex) {
-        const ws = global.workspaceManager.get_workspace_by_index(wsIndex);
+        const ws = global.workspace_manager.get_workspace_by_index(wsIndex);
         let wins = this._getWindows(null);
 
         wins = wins.filter(w => w.get_workspace() === ws);
@@ -1310,6 +1574,44 @@ const WorkspaceSwitcherPopupCustom = {
         return title;
     },
 };// );
+
+/**
+ * Shell Overview scales WorkspaceThumbnail via setScale() then thumbnail.allocate() from the
+ * parent vfunc_allocate. Clutter.Clone textures need a real allocation; root set_scale() without
+ * that pass keeps tiles grey despite nonzero clone counts in logs.
+ */
+const WorkspaceSwitcherManagerThumbnailClip = GObject.registerClass({
+    GTypeName: 'WorkspaceSwitcherManagerThumbnailClip',
+}, class WorkspaceSwitcherManagerThumbnailClip extends St.Widget {
+    _init() {
+        super._init({
+            clip_to_allocation: true,
+            style_class: 'wsm-workspace-thumbnail-clip',
+        });
+        this._innerBox = null;
+    }
+
+    setThumbnailInnerBox(actorBox) {
+        this._innerBox = actorBox;
+        this.queue_relayout();
+    }
+
+    vfunc_allocate(box) {
+        this.set_allocation(box);
+        const child = this.get_first_child();
+        if (!child || !this._innerBox)
+            return;
+        const themeNode = this.get_theme_node();
+        const content = themeNode.get_content_box(box);
+        const ib = this._innerBox;
+        const cb = new Clutter.ActorBox();
+        cb.x1 = content.x1 + ib.x1;
+        cb.y1 = content.y1 + ib.y1;
+        cb.x2 = content.x1 + ib.x2;
+        cb.y2 = content.y1 + ib.y2;
+        child.allocate(cb);
+    }
+});
 
 const WorkspaceSwitcherPopupList = GObject.registerClass(
 class WorkspaceSwitcherPopupList extends St.Widget {
