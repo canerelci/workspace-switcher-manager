@@ -98,6 +98,10 @@ export default class WSM extends ExtensionPreferences {
 
         this.opt.connect('changed::popup-mode', this._updateAdwActivePages.bind(this));
         this.opt.connect('changed::popup-visibility', this._updateAdwActivePages.bind(this));
+        this.opt.connect('changed::pointer-workspace-select-hotkey-preset', () => {
+            _syncPointerPresetAccelerator(this.opt);
+        });
+        _syncPointerPresetAccelerator(this.opt);
         window.connect('close-request', this._onDestroy.bind(this));
 
         const height = 700;
@@ -228,6 +232,56 @@ Static - number of workspaces is fixed to the number you can set below.`),
     // -----------------------------------------------------
     optionList.push(
         itemFactory.getRowWidget(
+            _('Pointer workspace selection')
+        )
+    );
+    // -----------------------------------------------------
+    optionList.push(
+        itemFactory.getRowWidget(
+            _('Shortcut opens switcher; click a workspace'),
+            _('When enabled, the shortcut below shows only the workspace switcher so you can pick a workspace with the mouse. If the same accelerator is already used in Settings → Keyboard, change one of them.'),
+            itemFactory.newSwitch(),
+            'pointerWorkspaceSelectEnabled'
+        )
+    );
+    // -----------------------------------------------------
+    optionList.push(
+        itemFactory.getRowWidget(
+            _('Shortcut preset'),
+            _('More presets may be added in a future release.'),
+            itemFactory.newDropDown(),
+            'pointerWorkspaceSelectHotkeyPreset',
+            [
+                [_('Super + W'), 0],
+            ],
+            'pointerWorkspaceSelectEnabled'
+        )
+    );
+    // -----------------------------------------------------
+    optionList.push(
+        itemFactory.getRowWidget(
+            _('Keep open until a workspace is clicked'),
+            _('When on, the pointer-select popup does not use the on-screen timer for that session, so it stays visible after you release the shortcut until you click a workspace. When off, the global pop-up on-screen time and modifier-hold behavior apply.'),
+            itemFactory.newSwitch(),
+            'pointerWorkspaceSelectPersistUntilClick',
+            [],
+            'pointerWorkspaceSelectEnabled'
+        )
+    );
+    // -----------------------------------------------------
+    optionList.push(
+        itemFactory.getRowWidget(
+            _('Show debug overlay (pointer-select)'),
+            _('Shows pointer position, stage pick targets, and enter/leave log on the popup. Use Copy for diagnostics.'),
+            itemFactory.newSwitch(),
+            'pointerWorkspaceSelectDebugOverlay',
+            [],
+            'pointerWorkspaceSelectEnabled'
+        )
+    );
+    // -----------------------------------------------------
+    optionList.push(
+        itemFactory.getRowWidget(
             _('Wraparound'),
             _('Continue from the last workspace to the first and vice versa'),
             itemFactory.newSwitch(),
@@ -245,6 +299,15 @@ Static - number of workspaces is fixed to the number you can set below.`),
     );
 
     return optionList;
+}
+
+function _syncPointerPresetAccelerator(opt) {
+    const PRESETS = [
+        ['<Super>w'],
+    ];
+    const p = opt.get('pointerWorkspaceSelectHotkeyPreset');
+    const accel = PRESETS[p] ?? PRESETS[0];
+    opt.set('pointerWorkspaceSelectAccelerator', accel);
 }
 
 
@@ -816,6 +879,67 @@ function _getColorOptionList(itemFactory) {
             null,
             inactiveBgColorBox,
             'popupInactiveBgColor'
+        )
+    );
+    // -----------------------------------------------------
+    optionList.push(
+        itemFactory.getRowWidget(
+            _('Pointer hover (pointer-select)'),
+            _('Colors while hovering workspace tiles when using the pointer-select shortcut.')
+        )
+    );
+    // -----------------------------------------------------
+    const inactiveHoverBgBox = itemFactory.newColorButtonBox();
+    const inactiveHoverBgBtn = itemFactory.newColorButton();
+    const inactiveHoverBgReset = itemFactory.newColorResetBtn('popupInactiveHoverBgColor', inactiveHoverBgBtn);
+    inactiveHoverBgBox.colorBtn = inactiveHoverBgBtn;
+    inactiveHoverBgBtn._gsettingsVar = 'popupInactiveHoverBgColor';
+
+    inactiveHoverBgBox.append(inactiveHoverBgBtn);
+    inactiveHoverBgBox.append(inactiveHoverBgReset);
+
+    optionList.push(
+        itemFactory.getRowWidget(
+            _('Inactive WS hover background'),
+            _('Inactive tile highlight while the pointer is over it.'),
+            inactiveHoverBgBox,
+            'popupInactiveHoverBgColor'
+        )
+    );
+    // -----------------------------------------------------
+    const inactiveHoverBdBox = itemFactory.newColorButtonBox();
+    const inactiveHoverBdBtn = itemFactory.newColorButton();
+    const inactiveHoverBdReset = itemFactory.newColorResetBtn('popupInactiveHoverBorderColor', inactiveHoverBdBtn);
+    inactiveHoverBdBox.colorBtn = inactiveHoverBdBtn;
+    inactiveHoverBdBtn._gsettingsVar = 'popupInactiveHoverBorderColor';
+
+    inactiveHoverBdBox.append(inactiveHoverBdBtn);
+    inactiveHoverBdBox.append(inactiveHoverBdReset);
+
+    optionList.push(
+        itemFactory.getRowWidget(
+            _('Inactive WS hover border'),
+            null,
+            inactiveHoverBdBox,
+            'popupInactiveHoverBorderColor'
+        )
+    );
+    // -----------------------------------------------------
+    const activeGlowBox = itemFactory.newColorButtonBox();
+    const activeGlowBtn = itemFactory.newColorButton();
+    const activeGlowReset = itemFactory.newColorResetBtn('popupActiveHoverGlowColor', activeGlowBtn);
+    activeGlowBox.colorBtn = activeGlowBtn;
+    activeGlowBtn._gsettingsVar = 'popupActiveHoverGlowColor';
+
+    activeGlowBox.append(activeGlowBtn);
+    activeGlowBox.append(activeGlowReset);
+
+    optionList.push(
+        itemFactory.getRowWidget(
+            _('Active WS hover glow'),
+            _('Outer glow around the active tile when the pointer is over it.'),
+            activeGlowBox,
+            'popupActiveHoverGlowColor'
         )
     );
 

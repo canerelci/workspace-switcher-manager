@@ -62,6 +62,32 @@ Run following commands in the terminal (`git` needs to be installed, navigate to
     git checkout legacy
     make install
 
+## Development
+
+Build and test the extension from a Git checkout (same extension UUID as [extensions.gnome.org](https://extensions.gnome.org/extension/4788/workspace-switcher-manager/), so a local `make install` replaces the store-installed copy).
+
+**Does Shell have to load files from the extensions directory?** Yes, for a real session test: GNOME Shell only loads extensions from `~/.local/share/gnome-shell/extensions/<uuid>/`. It cannot run the project straight from an arbitrary clone path. To avoid repacking and reinstalling on every change, use **`make dev-link`** once so your repo is symlinked into that directory; then edit sources and restart Shell.
+
+**What works without placing anything under `extensions/`:** `make check` compiles schemas and builds the zip—good for CI and validation, but it does not run the extension inside GNOME Shell.
+
+**Requirements:** `make`, `zip`, `glib-compile-schemas` (GLib), `gnome-extensions` (GNOME Shell).
+
+| Command | Purpose |
+|--------|---------|
+| `make check` | Compile GSettings schemas and build `workspace-switcher-manager@G-dH.github.com.zip` (enforces EGO size limit). Use before commits or in CI. |
+| `make` / `make build` | Build the zip only. |
+| `make dev-link` | Symlink this repo into `~/.local/share/gnome-shell/extensions/workspace-switcher-manager@G-dH.github.com/`. Edit in place; restart Shell to load changes. If that path is already a normal directory (e.g. from Extension Manager), run `make uninstall` once, then `make dev-link`. |
+| `make dev-unlink` | Remove the symlink created by `dev-link` (safe only when that UUID path is a symlink). |
+| `make install` | Build the zip and install into the extensions directory (extracted copy). |
+| `make uninstall` | Remove the installed extension directory. |
+| `make clean` | Remove the zip, compiled schema blob, and generated `locale/` artifacts. |
+
+After `make install` or `make dev-link`, restart GNOME Shell (X11: Alt+F2, type `r`, Enter; Wayland: log out and back in). Then enable the extension if needed (`gnome-extensions enable workspace-switcher-manager@G-dH.github.com`).
+
+If you already enabled the extension from Extension Manager, `make install` overwrites the same UUID; for `dev-link`, uninstall first so the UUID path can become a symlink.
+
+**Pointer workspace selection (optional):** When enabled in preferences (General), the extension registers an accelerator (default **Super+W**) through GNOME Shell. If that shortcut is already used under **Settings → Keyboard**, change one of the assignments so the binding can be grabbed. **Keep open until a workspace is clicked** (on by default) avoids the on-screen timer for that flow so the popup stays up after you release the keys until you click a workspace; turn it off to use the same timing as other switcher popups.
+
 ## Enabling the extension
 
 After any installation you need to enable the extension and access its preferences.

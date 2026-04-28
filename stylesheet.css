@@ -36,6 +36,18 @@
   border-color: rgb(53, 53, 53);
   border-radius: 8px;
   color: white;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.ws-switcher-box:hover {
+  background-color: rgba(255, 255, 255, 0.09);
+  border-color: rgba(200, 200, 200, 0.45);
+}
+
+/* Same look as :hover; toggled from JS for pointer-select (modal breaks stylesheet :hover). */
+.ws-switcher-box.wsm-pointer-hover {
+  background-color: rgba(255, 255, 255, 0.09);
+  border-color: rgba(200, 200, 200, 0.45);
 }
 
 /* active workspace box */
@@ -45,9 +57,35 @@
   border: 1px solid;
   border-radius: 8px;
   color: white;
+  transition: filter 120ms ease, background-color 120ms ease;
+}
+
+.ws-switcher-active:hover {
+  filter: brightness(1.1);
+}
+
+.ws-switcher-active.wsm-pointer-hover {
+  filter: brightness(1.38) saturate(1.1);
+  box-shadow: 0 0 14px rgba(255, 255, 255, 0.55),
+              0 0 32px rgba(255, 255, 255, 0.28);
 }
 
 /* reverse padding */
 .ws-switcher-vertical {
   padding: 18px 12px
+}
+
+.wsm-pointer-debug-panel {
+  padding: 8px;
+  spacing: 6px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background-color: rgba(12, 12, 18, 0.94);
+}
+
+.wsm-pointer-debug-label {
+  font-family: monospace;
+  font-size: 10px;
+  color: #e8e8e8;
+  max-width: 380px;
 }

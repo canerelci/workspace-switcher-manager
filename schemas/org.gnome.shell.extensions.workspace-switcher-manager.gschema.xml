@@ -16,6 +16,35 @@
       <default>false</default>
     </key>
 
+    <key type="b" name="pointer-workspace-select-enabled">
+      <default>false</default>
+      <summary>Show workspace switcher on shortcut and switch by mouse</summary>
+      <description>When enabled, the configured shortcut opens only the workspace switcher popup so you can click a workspace to activate it.</description>
+    </key>
+
+    <key type="i" name="pointer-workspace-select-hotkey-preset">
+      <default>0</default>
+      <summary>Preset for pointer-select shortcut</summary>
+      <description>Reserved for future additional shortcuts; 0 means Super+W.</description>
+    </key>
+
+    <key type="as" name="pointer-workspace-select-accelerator">
+      <default><![CDATA[['<Super>w']]]></default>
+      <summary>Accelerator for pointer-select workspace popup</summary>
+      <description>Keybinding that opens the workspace switcher for mouse selection (stored as an accelerator array).</description>
+    </key>
+
+    <key type="b" name="pointer-workspace-select-persist-until-click">
+      <default>true</default>
+      <summary>Keep pointer-select popup until you click a workspace</summary>
+      <description>When enabled, the pointer-select popup stays open until you click a workspace (no timer while keys are released). When disabled, normal on-screen time and modifier-key rules apply.</description>
+    </key>
+
+    <key type="b" name="pointer-workspace-select-debug-overlay">
+      <default>false</default>
+      <summary>Show debug overlay on pointer-select popup</summary>
+      <description>When enabled, a small panel shows pointer position, stage pick targets, and enter/leave log; includes a Copy button for diagnostics.</description>
+    </key>
 
     <key type="i" name="popup-mode">
       <default>0</default>
@@ -102,6 +131,22 @@
       <default>'rgb(29,29,29)'</default>
     </key>
 
+    <key type="s" name="popup-inactive-hover-bg-color">
+      <default>'rgba(255,255,255,0.22)'</default>
+      <summary>Inactive workspace hover background</summary>
+      <description>Background highlight when the pointer hovers an inactive workspace tile (pointer-select session).</description>
+    </key>
+    <key type="s" name="popup-inactive-hover-border-color">
+      <default>'rgba(255,255,255,0.72)'</default>
+      <summary>Inactive workspace hover border</summary>
+      <description>Border color when the pointer hovers an inactive workspace tile (pointer-select session).</description>
+    </key>
+    <key type="s" name="popup-active-hover-glow-color">
+      <default>'rgba(255,255,255,0.55)'</default>
+      <summary>Active workspace hover glow</summary>
+      <description>Glow color around the active workspace tile when hovered (pointer-select session).</description>
+    </key>
+
 
     <key type="b" name="active-show-ws-index">
       <default>true</default>
@@ -152,6 +197,9 @@
         'popupActiveBgColor': 'rgb(0,110,255)',
         'popupInactiveFgColor': 'rgb(255,255,255)',
         'popupInactiveBgColor': 'rgb(29,29,29)',
+        'popupInactiveHoverBgColor': 'rgba(255,255,255,0.22)',
+        'popupInactiveHoverBorderColor': 'rgba(255,255,255,0.72)',
+        'popupActiveHoverGlowColor': 'rgba(255,255,255,0.55)',
         'activeShowWsIndex': 'true',
         'activeShowWsName': 'false',
         'activeShowAppName': 'true',
@@ -186,6 +234,9 @@
         'popupActiveBgColor': 'rgba(105,0,0,0.9)',
         'popupInactiveFgColor': 'rgb(255,255,255)',
         'popupInactiveBgColor': 'rgba(29,29,29,0)',
+        'popupInactiveHoverBgColor': 'rgba(255,255,255,0.22)',
+        'popupInactiveHoverBorderColor': 'rgba(255,255,255,0.72)',
+        'popupActiveHoverGlowColor': 'rgba(255,255,255,0.55)',
         'activeShowWsIndex': 'false',
         'activeShowWsName': 'false',
         'activeShowAppName': 'true',
@@ -220,6 +271,9 @@
         'popupActiveBgColor': 'rgb(0,110,255)',
         'popupInactiveFgColor': 'rgb(255,255,255)',
         'popupInactiveBgColor': 'rgb(53,53,53)',
+        'popupInactiveHoverBgColor': 'rgba(255,255,255,0.22)',
+        'popupInactiveHoverBorderColor': 'rgba(255,255,255,0.72)',
+        'popupActiveHoverGlowColor': 'rgba(255,255,255,0.55)',
         'activeShowWsIndex': 'false',
         'activeShowWsName': 'false',
         'activeShowAppName': 'false',
@@ -254,6 +308,9 @@
         'popupActiveBgColor': 'rgba(0,0,0,0)',
         'popupInactiveFgColor': 'rgb(255,255,255)',
         'popupInactiveBgColor': 'rgba(0,0,0,0)',
+        'popupInactiveHoverBgColor': 'rgba(255,255,255,0.22)',
+        'popupInactiveHoverBorderColor': 'rgba(255,255,255,0.72)',
+        'popupActiveHoverGlowColor': 'rgba(255,255,255,0.55)',
         'activeShowWsIndex': 'true',
         'activeShowWsName': 'false',
         'activeShowAppName': 'true',
@@ -288,6 +345,9 @@
         'popupActiveBgColor': 'rgb(233,84,32)',
         'popupInactiveFgColor': 'rgb(255,255,255)',
         'popupInactiveBgColor': 'rgb(53,53,53)',
+        'popupInactiveHoverBgColor': 'rgba(255,255,255,0.22)',
+        'popupInactiveHoverBorderColor': 'rgba(255,255,255,0.72)',
+        'popupActiveHoverGlowColor': 'rgba(255,255,255,0.55)',
         'activeShowWsIndex': 'true',
         'activeShowWsName': 'false',
         'activeShowAppName': 'false',

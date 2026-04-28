@@ -4,6 +4,9 @@ SHELL := /bin/bash
 NAME     := workspace-switcher-manager
 DOMAIN   := G-dH.github.com
 ZIP_NAME := $(NAME)@$(DOMAIN).zip
+EXT_UUID := $(NAME)@$(DOMAIN)
+USER_EXT_DIR := $(HOME)/.local/share/gnome-shell/extensions
+DEV_LINK := $(USER_EXT_DIR)/$(EXT_UUID)
 
 # Some of the recipes below depend on some of these files.
 JS_FILES       = $(shell find -type f -and \( -name "*.js" \))
@@ -16,18 +19,50 @@ LOCALES_MO     = $(patsubst po/%.po,locale/%/LC_MESSAGES/$(NAME).mo,$(LOCALES_PO
 ZIP_CONTENT = $(JS_FILES) $(LOCALES_MO) \
               schemas/* schemas/gschemas.compiled metadata.json stylesheet.css LICENSE
 
-# These five recipes can be invoked by the user.
-.PHONY: all zip install uninstall pot clean
+# These recipes can be invoked by the user.
+.PHONY: all build zip check install uninstall pot clean dev-link dev-unlink
 
 all: $(ZIP_CONTENT)
 
-# The zip recipes only bundles the extension without installing it.
+# Alias for packaging (zip); same as `zip`.
+build: $(ZIP_NAME)
+	@echo "Build complete: $(ZIP_NAME)"
+
+# The zip recipe bundles the extension without installing it.
 zip: $(ZIP_NAME)
 
-# The install recipes creates the extension zip and installs it.
+# Validate schemas compile and the bundle builds (CI-friendly).
+check: schemas/gschemas.compiled $(ZIP_NAME)
+	@echo "check: OK ($(ZIP_NAME))"
+
+# The install recipe builds the zip and installs it for local testing (same UUID as extensions.gnome.org).
 install: $(ZIP_NAME)
 	gnome-extensions install "$(ZIP_NAME)" --force
 	@echo "Extension installed successfully! Now restart the Shell ('Alt'+'F2', then 'r' or log out/log in on Wayland)."
+
+# Symlink this repo into the Shell extensions directory so edits apply without repacking/reinstalling.
+# GNOME Shell only loads extensions from that directory (not from an arbitrary clone path).
+dev-link: schemas/gschemas.compiled
+	@mkdir -p "$(USER_EXT_DIR)"
+	@if [[ -e "$(DEV_LINK)" && ! -L "$(DEV_LINK)" ]]; then \
+		echo "ERROR: $(DEV_LINK) exists and is not a symlink. Remove it or run 'make uninstall' first." >&2; \
+		exit 1; \
+	fi
+	@ln -sfn "$(CURDIR)" "$(DEV_LINK)"
+	@echo "Symlink: $(DEV_LINK) -> $(CURDIR)"
+	@echo "Restart GNOME Shell (X11: Alt+F2 'r'; Wayland: log out/in). Then enable or reload the extension."
+
+# Remove only the symlink created by dev-link (safe if the target is a symlink to this repo).
+dev-unlink:
+	@if [[ -L "$(DEV_LINK)" ]]; then \
+		rm -f "$(DEV_LINK)"; \
+		echo "Removed symlink $(DEV_LINK)"; \
+	elif [[ -e "$(DEV_LINK)" ]]; then \
+		echo "ERROR: $(DEV_LINK) is not a symlink; use 'make uninstall' or remove the directory manually." >&2; \
+		exit 1; \
+	else \
+		echo "Nothing to remove ($(DEV_LINK) missing)."; \
+	fi
 
 # This uninstalls the previously installed extension.
 uninstall:

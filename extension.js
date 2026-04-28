@@ -37,6 +37,516 @@ const wsPopupMode = {
     DEFAULT: 2,
 };
 
+const POINTER_SELECT_PRESETS = [
+    ['<Super>w'],
+];
+
+/** Applied by pointer-hover timer; stylesheet :hover is unreliable under modal. */
+const WSM_POINTER_HOVER_CLASS = 'wsm-pointer-hover';
+
+function _wsmPointerSessionPersistsUntilClick() {
+    return opt.get('pointerWorkspaceSelectPersistUntilClick');
+}
+
+/** Modal subtree is `popup._widget` (custom) or stock `popup`; Shell routes pointer/keys there after pushModal. */
+function _wsmModalShellActor(popup) {
+    return popup._widget ?? popup;
+}
+
+/** Mirror _setCustomStyle tile branch but with visible hover (inline beats stylesheet). */
+function _wsmApplyPointerHoverTileStyles(popup, hoveredIdx) {
+    if (!popup._list || popup._boxBgSize === undefined || popup._boxRadius === undefined)
+        return;
+
+    const inactiveHoverBg = opt.get('popupInactiveHoverBgColor');
+    const inactiveHoverBd = opt.get('popupInactiveHoverBorderColor');
+    const activeGlow = opt.get('popupActiveHoverGlowColor');
+
+    const children = popup._list.get_children();
+    const activeWs = popup._activeWorkspaceIndex;
+    const pm = popup._popupMode;
+
+    for (let i = 0; i < children.length; i++) {
+        const ch = children[i];
+        const useActiveStyle = i === activeWs || pm;
+        const isHover = hoveredIdx !== null && ch._wsIndex === hoveredIdx;
+
+        const bs = popup._boxBgSize;
+        const br = popup._boxRadius;
+
+        if (useActiveStyle) {
+            if (isHover) {
+                ch.set_style(` background-size: ${bs}px;
+                                        border-radius: ${br}px;
+                                        color: ${popup._activeFgColor};
+                                        background-color: ${popup._activeBgColor};
+                                        border-color: ${popup._activeBgColor};
+                                        filter: brightness(1.38) saturate(1.1);
+                                        box-shadow: 0 0 14px ${activeGlow}, 0 0 32px ${activeGlow};`);
+            } else {
+                ch.set_style(` background-size: ${bs}px;
+                                        border-radius: ${br}px;
+                                        color: ${popup._activeFgColor};
+                                        background-color: ${popup._activeBgColor};
+                                        border-color: ${popup._activeBgColor};
+                                        box-shadow: none;
+                                        filter: none;`);
+            }
+        } else {
+            let bg = popup._inactiveBgColor;
+            let bd = popup._borderColor;
+            if (isHover) {
+                bg = inactiveHoverBg;
+                bd = inactiveHoverBd;
+            }
+            ch.set_style(` background-size: ${bs}px;
+                                        border-radius: ${br}px;
+                                        color: ${popup._inactiveFgColor};
+                                        background-color: ${bg};
+                                        border-color: ${bd};`);
+        }
+    }
+}
+
+/** Hover highlight: pick under pointer finds tile (enter/hover often broken under modal). */
+function _wsmPointerHoverVisualTick(popup) {
+    if (Main.wm._workspaceSwitcherPopup !== popup || !popup._wsmPointerSelect || !popup._list)
+        return GLib.SOURCE_REMOVE;
+
+    const [px, py] = global.get_pointer();
+    let actor = null;
+    try {
+        actor = _wsmPickActorAt(Clutter.PickMode.REACTIVE, px, py);
+    } catch (e) {
+        actor = null;
+    }
+
+    let idx = null;
+    let a = actor;
+    while (a) {
+        if (a._wsIndex !== undefined) {
+            idx = a._wsIndex;
+            break;
+        }
+        a = a.get_parent();
+    }
+
+    const prev = popup._wsmHoverVisualIdx;
+    if (idx !== prev && opt.get('pointerWorkspaceSelectDebugOverlay'))
+        _wsmPointerDebugAppend(popup, `pick-hover ws=${idx === null ? 'none' : idx}`);
+
+    popup._wsmHoverVisualIdx = idx;
+    for (const ch of popup._list.get_children()) {
+        if (ch._wsIndex === undefined)
+            continue;
+        if (idx !== null && ch._wsIndex === idx)
+            ch.add_style_class_name(WSM_POINTER_HOVER_CLASS);
+        else
+            ch.remove_style_class_name(WSM_POINTER_HOVER_CLASS);
+    }
+    _wsmApplyPointerHoverTileStyles(popup, idx);
+    return GLib.SOURCE_CONTINUE;
+}
+
+function _wsmDisconnectPointerSelectHandlers(popup) {
+    if (popup._wsmHoverVisualTimerId) {
+        GLib.source_remove(popup._wsmHoverVisualTimerId);
+        popup._wsmHoverVisualTimerId = 0;
+    }
+    popup._wsmHoverVisualIdx = undefined;
+    if (popup._list) {
+        for (const ch of popup._list.get_children()) {
+            if (ch._wsIndex !== undefined)
+                ch.remove_style_class_name(WSM_POINTER_HOVER_CLASS);
+        }
+    }
+    if (typeof popup._setCustomStyle === 'function')
+        popup._setCustomStyle();
+
+    if (!popup._wsmPointerBindings?.length)
+        return;
+    for (const h of popup._wsmPointerBindings)
+        h.actor.disconnect(h.id);
+    popup._wsmPointerBindings = [];
+}
+
+function _wsmAttachPointerSelectHandlers(popup) {
+    _wsmDisconnectPointerSelectHandlers(popup);
+    if (!popup._wsmPointerSelect || !popup._list)
+        return;
+    popup._wsmPointerBindings = [];
+    let idx = 0;
+    for (const child of popup._list.get_children()) {
+        const captured = child;
+        if (captured._wsIndex === undefined)
+            captured._wsIndex = idx;
+        idx++;
+        captured.reactive = true;
+        captured.track_hover = true;
+
+        const id = captured.connect('button-press-event', (actor, event) => {
+            if (event.get_button() !== Clutter.BUTTON_PRIMARY)
+                return Clutter.EVENT_PROPAGATE;
+            const wsIdx = captured._wsIndex;
+            if (wsIdx === undefined)
+                return Clutter.EVENT_PROPAGATE;
+            const ws = global.workspace_manager.get_workspace_by_index(wsIdx);
+            if (ws)
+                ws.activate(global.get_current_time());
+            popup.destroy();
+            return Clutter.EVENT_STOP;
+        });
+        popup._wsmPointerBindings.push({ actor: captured, id });
+    }
+
+    popup._wsmHoverVisualTimerId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 33,
+        () => _wsmPointerHoverVisualTick(popup));
+}
+
+function _wsmMarkSubtreeNonReactive(actor) {
+    if (!actor)
+        return;
+    actor.reactive = false;
+    actor.track_hover = false;
+    for (const c of actor.get_children())
+        _wsmMarkSubtreeNonReactive(c);
+}
+
+function _wsmUnbindEsc(popup) {
+    if (popup._wsmEscGrabIdleId) {
+        GLib.source_remove(popup._wsmEscGrabIdleId);
+        popup._wsmEscGrabIdleId = 0;
+    }
+    if (popup._wsmEscStageKeyId) {
+        global.stage.disconnect(popup._wsmEscStageKeyId);
+        popup._wsmEscStageKeyId = 0;
+    }
+    if (popup._wsmEscActorKeyId) {
+        const escTarget = popup._widget ?? popup;
+        if (escTarget)
+            escTarget.disconnect(popup._wsmEscActorKeyId);
+        popup._wsmEscActorKeyId = 0;
+    }
+}
+
+function _wsmBindEscToClose(popup) {
+    if (!popup._wsmPointerSelect)
+        return;
+    _wsmUnbindEsc(popup);
+
+    const escHandler = (actor, event) => {
+        if (Main.wm._workspaceSwitcherPopup !== popup)
+            return Clutter.EVENT_PROPAGATE;
+        let sym;
+        try {
+            sym = event.get_key_symbol();
+        } catch (e) {
+            return Clutter.EVENT_PROPAGATE;
+        }
+        if (sym !== Clutter.KEY_Escape)
+            return Clutter.EVENT_PROPAGATE;
+        popup.destroy();
+        return Clutter.EVENT_STOP;
+    };
+
+    popup._wsmEscStageKeyId = global.stage.connect('key-press-event', escHandler);
+
+    const escTarget = popup._widget ?? popup;
+    if (escTarget)
+        popup._wsmEscActorKeyId = escTarget.connect('key-press-event', escHandler);
+
+    if (!popup._wsmEscCleanupRegistered) {
+        popup._wsmEscCleanupRegistered = true;
+        popup.connect('destroy', () => {
+            _wsmUnbindEsc(popup);
+        });
+    }
+}
+
+/** Grab keyboard/pointer so the overlay receives events (Esc, clicks outside tiles). */
+function _wsmPushPointerModal(popup) {
+    if (!popup._wsmPointerSelect)
+        return;
+    const actor = popup._widget ?? popup;
+    if (!actor)
+        return;
+    _wsmPopPointerModal(popup);
+    try {
+        const params = {
+            timestamp: global.get_current_time(),
+            actionMode: Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW | Shell.ActionMode.POPUP,
+        };
+        const result = Main.pushModal(actor, params);
+        popup._wsmModalGrab = result;
+        popup._wsmModalActor = actor;
+    } catch (e) {
+        console.warn('WSM: pushModal failed', e?.message ?? e);
+    }
+}
+
+function _wsmPopPointerModal(popup) {
+    const grab = popup._wsmModalGrab;
+    const actor = popup._wsmModalActor ?? popup._widget ?? popup;
+    popup._wsmModalGrab = undefined;
+    popup._wsmModalActor = null;
+    if (grab === undefined || grab === null || grab === false)
+        return;
+    try {
+        if (grab === true)
+            Main.popModal(actor);
+        else
+            Main.popModal(grab);
+    } catch (e) {
+        try {
+            Main.popModal(actor);
+        } catch (e2) {
+            /* ignore */
+        }
+    }
+}
+
+const WSM_POINTER_DEBUG_MAX_LINES = 36;
+
+function _wsmDescribeActorChain(actor) {
+    if (!actor)
+        return '(null)';
+    const parts = [];
+    let a = actor;
+    for (let i = 0; i < 12 && a; i++) {
+        let typeName = 'Actor';
+        try {
+            typeName = GObject.type_name_from_instance(a);
+        } catch (e) {
+            /* ignore */
+        }
+        let sc = '';
+        try {
+            sc = a.get_style_class_name?.() ?? '';
+        } catch (e) {
+            /* ignore */
+        }
+        const nm = a.name || '';
+        const shortSc = sc ? sc.split(/\s+/).slice(0, 5).join('.') : '';
+        parts.push(`${typeName}${nm ? `[${nm}]` : ''}${shortSc ? ` #${shortSc}` : ''}`);
+        a = a.get_parent();
+    }
+    return parts.join(' <- ');
+}
+
+function _wsmPickActorAt(pickMode, x, y) {
+    const st = global.stage;
+    try {
+        if (st.get_actor_at_pos)
+            return st.get_actor_at_pos(pickMode, x, y);
+        if (st.get_actor_at_point)
+            return st.get_actor_at_point(pickMode, x, y);
+    } catch (e) {
+        return null;
+    }
+    return null;
+}
+
+function _wsmPointerDebugAppend(popup, line) {
+    if (!popup._wsmPointerSelect || !opt.get('pointerWorkspaceSelectDebugOverlay'))
+        return;
+    if (!popup._wsmDebugLines)
+        popup._wsmDebugLines = [];
+    const t = GLib.DateTime.new_now_local().format('%H:%M:%S');
+    popup._wsmDebugLines.push(`${t} ${line}`);
+    if (popup._wsmDebugLines.length > WSM_POINTER_DEBUG_MAX_LINES)
+        popup._wsmDebugLines.splice(0, popup._wsmDebugLines.length - WSM_POINTER_DEBUG_MAX_LINES);
+}
+
+function _wsmDestroyPointerDebugOverlay(popup) {
+    if (popup._wsmDebugTickId) {
+        GLib.source_remove(popup._wsmDebugTickId);
+        popup._wsmDebugTickId = 0;
+    }
+    if (popup._wsmDebugAllocId) {
+        const ref = popup._wsmDebugAllocTarget;
+        if (ref)
+            ref.disconnect(popup._wsmDebugAllocId);
+        popup._wsmDebugAllocId = 0;
+        popup._wsmDebugAllocTarget = null;
+    }
+    if (popup._wsmDebugCopyKeyId) {
+        const ka = popup._wsmDebugCopyKeyActor ?? _wsmModalShellActor(popup);
+        if (ka)
+            ka.disconnect(popup._wsmDebugCopyKeyId);
+        popup._wsmDebugCopyKeyId = 0;
+        popup._wsmDebugCopyKeyActor = null;
+    }
+    if (popup._wsmDebugOuter) {
+        popup._wsmDebugOuter.destroy();
+        popup._wsmDebugOuter = null;
+    }
+    popup._wsmDebugLabel = null;
+    popup._wsmDebugLines = null;
+    popup._wsmDebugExportText = '';
+}
+
+function _wsmPointerDebugCopyToClipboard(popup) {
+    const t = popup._wsmDebugExportText ?? '';
+    St.Clipboard.get_default().set_text(St.ClipboardType.CLIPBOARD, t);
+}
+
+function _wsmPointerDebugRaiseOverlay(popup) {
+    const o = popup._wsmDebugOuter;
+    if (o && typeof o.raise_top === 'function')
+        o.raise_top();
+}
+
+function _wsmPositionPointerDebugOverlay(popup) {
+    if (!popup._wsmDebugOuter)
+        return;
+    const ref = popup._container ?? popup._list ?? popup;
+    if (!ref)
+        return;
+    const [cx, cy] = ref.get_position();
+    const [cw] = ref.get_size();
+    const margin = 8;
+    const dbg = popup._wsmDebugOuter;
+    const dw = dbg.width > 1 ? dbg.width : 380;
+    dbg.set_position(Math.round(cx + cw - dw - margin), Math.round(cy + margin));
+}
+
+function _wsmPointerDebugTick(popup) {
+    if (Main.wm._workspaceSwitcherPopup !== popup || !popup._wsmDebugLabel)
+        return GLib.SOURCE_REMOVE;
+
+    const [px, py] = global.get_pointer();
+    let pickReactive = '(n/a)';
+    let pickAll = '(n/a)';
+    try {
+        const ar = _wsmPickActorAt(Clutter.PickMode.REACTIVE, px, py);
+        pickReactive = _wsmDescribeActorChain(ar);
+    } catch (e) {
+        pickReactive = String(e?.message ?? e);
+    }
+    try {
+        const aa = _wsmPickActorAt(Clutter.PickMode.ALL, px, py);
+        pickAll = _wsmDescribeActorChain(aa);
+    } catch (e) {
+        pickAll = String(e?.message ?? e);
+    }
+
+    let hoverBits = '';
+    if (popup._list) {
+        const bits = [];
+        for (const ch of popup._list.get_children()) {
+            if (ch._wsIndex === undefined)
+                continue;
+            bits.push(`ws${ch._wsIndex}:h=${ch.hover ? 1 : 0}`);
+        }
+        hoverBits = bits.join(' ');
+    }
+
+    const lines = popup._wsmDebugLines ?? [];
+    const header = [
+        `WSM pointer-select debug`,
+        `pointer: (${px}, ${py})`,
+        `pick REACTIVE: ${pickReactive}`,
+        `pick ALL: ${pickAll}`,
+        `modal grab: ${popup._wsmModalGrab ? 'yes' : 'no'}`,
+        `tile.hover: ${hoverBits || '(no list)'}`,
+        `pick-hover idx: ${popup._wsmHoverVisualIdx === undefined ? '(n/a)' : popup._wsmHoverVisualIdx === null ? 'none' : popup._wsmHoverVisualIdx}`,
+        '--- log ---',
+        ...lines,
+    ];
+    popup._wsmDebugExportText = header.join('\n');
+    popup._wsmDebugLabel.clutter_text.set_text(header.join('\n'));
+    _wsmPositionPointerDebugOverlay(popup);
+    _wsmPointerDebugRaiseOverlay(popup);
+    return GLib.SOURCE_CONTINUE;
+}
+
+function _wsmAttachPointerDebugOverlay(popup) {
+    _wsmDestroyPointerDebugOverlay(popup);
+    if (!popup._wsmPointerSelect || !opt.get('pointerWorkspaceSelectDebugOverlay'))
+        return;
+
+    popup._wsmDebugLines = [];
+
+    const outer = new St.BoxLayout({
+        vertical: true,
+        style_class: 'wsm-pointer-debug-panel',
+        reactive: true,
+    });
+    outer.set_width(380);
+
+    const label = new St.Label({
+        style_class: 'wsm-pointer-debug-label',
+        text: 'WSM debug…',
+    });
+    label.clutter_text.line_wrap = true;
+    label.set_width(380);
+
+    const btn = new St.Button({
+        label: 'Copy debug (Ctrl+Shift+C)',
+        style_class: 'button',
+        reactive: true,
+        track_hover: true,
+        can_focus: true,
+    });
+    btn.connect('button-press-event', (actor, event) => {
+        if (event.get_button() !== Clutter.BUTTON_PRIMARY)
+            return Clutter.EVENT_PROPAGATE;
+        _wsmPointerDebugCopyToClipboard(popup);
+        return Clutter.EVENT_STOP;
+    });
+
+    outer.add_child(label);
+    outer.add_child(btn);
+
+    const shellActor = _wsmModalShellActor(popup);
+    shellActor.add_child(outer);
+    popup._wsmDebugOuter = outer;
+    popup._wsmDebugLabel = label;
+
+    _wsmPointerDebugRaiseOverlay(popup);
+
+    popup._wsmDebugCopyKeyActor = shellActor;
+    popup._wsmDebugCopyKeyId = shellActor.connect('key-press-event', (actor, event) => {
+        if (Main.wm._workspaceSwitcherPopup !== popup)
+            return Clutter.EVENT_PROPAGATE;
+        const need = Clutter.ModifierType.CONTROL_MASK | Clutter.ModifierType.SHIFT_MASK;
+        if ((event.get_state() & need) !== need)
+            return Clutter.EVENT_PROPAGATE;
+        const sym = event.get_key_symbol();
+        if (sym !== Clutter.KEY_c && sym !== Clutter.KEY_C)
+            return Clutter.EVENT_PROPAGATE;
+        _wsmPointerDebugCopyToClipboard(popup);
+        return Clutter.EVENT_STOP;
+    });
+
+    const ref = popup._container ?? popup._list ?? popup;
+    if (ref) {
+        popup._wsmDebugAllocTarget = ref;
+        popup._wsmDebugAllocId = ref.connect('notify::allocation', () => {
+            _wsmPositionPointerDebugOverlay(popup);
+        });
+    }
+
+    popup._wsmDebugTickId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 200, () => _wsmPointerDebugTick(popup));
+
+    GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+        if (Main.wm._workspaceSwitcherPopup === popup)
+            _wsmPointerDebugTick(popup);
+        return GLib.SOURCE_REMOVE;
+    });
+
+    _wsmPointerDebugAppend(popup, 'debug overlay created');
+}
+
+
+/** Work area used to clamp workspace-switcher list size (matches monitor preference: primary vs current). */
+function _wsmWorkAreaForPopupSizing() {
+    const monIdx = opt.get('monitor') === 0
+        ? Main.layoutManager.primaryIndex
+        : global.display.get_current_monitor();
+    return Main.layoutManager.getWorkAreaForMonitor(monIdx);
+}
+
 
 export default class WSM extends Extension {
     enable() {
@@ -57,10 +567,15 @@ export default class WSM extends Extension {
 
         opt.connect('changed', this._updateSettings.bind(this));
 
+        this._syncPointerPresetToAccelerator();
+        this._updatePointerSelectKeybinding();
+
         console.debug(`${this.metadata.name}: enabled`);
     }
 
     disable() {
+        Main.wm.removeKeybinding('pointer-workspace-select-accelerator');
+
         if (this._prefsDemoTimeoutId) {
             GLib.source_remove(this._prefsDemoTimeoutId);
             this._prefsDemoTimeoutId = 0;
@@ -99,6 +614,12 @@ export default class WSM extends Extension {
     // ------------------------------------------------------------------------------
     _updateSettings(settings, key) {
         switch (key) {
+        case 'pointer-workspace-select-enabled':
+        case 'pointer-workspace-select-accelerator':
+        case 'pointer-workspace-select-hotkey-preset':
+            this._syncPointerPresetToAccelerator();
+            this._updatePointerSelectKeybinding();
+            return;
         case 'popup-mode':
             this._updatePopupMode();
             break;
@@ -223,6 +744,45 @@ export default class WSM extends Extension {
 
         return global.workspace_manager.get_workspace_by_index(neighborExists || wraparound ? index : activeIndex);
     }
+
+    _syncPointerPresetToAccelerator() {
+        const p = opt.get('pointerWorkspaceSelectHotkeyPreset');
+        const accel = POINTER_SELECT_PRESETS[p] ?? POINTER_SELECT_PRESETS[0];
+        opt.set('pointerWorkspaceSelectAccelerator', accel);
+    }
+
+    _updatePointerSelectKeybinding() {
+        Main.wm.removeKeybinding('pointer-workspace-select-accelerator');
+        if (!opt.get('pointerWorkspaceSelectEnabled'))
+            return;
+        Main.wm.addKeybinding(
+            'pointer-workspace-select-accelerator',
+            this.getSettings(),
+            Meta.KeyBindingFlags.NONE,
+            Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW,
+            () => this._onPointerSelectActivate()
+        );
+    }
+
+    _onPointerSelectActivate() {
+        if (!opt.get('pointerWorkspaceSelectEnabled'))
+            return;
+        const wsIndex = global.workspaceManager.get_active_workspace_index();
+        if (Main.wm._workspaceSwitcherPopup) {
+            Main.wm._workspaceSwitcherPopup.destroy();
+            Main.wm._workspaceSwitcherPopup = null;
+        }
+        globalThis._wsmPointerSelectOpening = true;
+        try {
+            Main.wm._workspaceSwitcherPopup = new WorkspaceSwitcherPopup.WorkspaceSwitcherPopup();
+            Main.wm._workspaceSwitcherPopup.connect('destroy', () => {
+                Main.wm._workspaceSwitcherPopup = null;
+            });
+            Main.wm._workspaceSwitcherPopup.display(wsIndex);
+        } finally {
+            globalThis._wsmPointerSelectOpening = false;
+        }
+    }
 }
 
 // -------------------------------------------------------------------------------------
@@ -243,15 +803,19 @@ const WorkspaceSwitcherPopupCustom = {
             height: global.screen_height,
             style_class: 'workspace-switcher-group',
         });
+        /* Pointer-select: full-area hit target + modal grab; labels stay reactive when marking non-reactive would pass clicks through. */
+        if (globalThis._wsmPointerSelectOpening === true)
+            this._widget.reactive = true;
 
         Main.uiGroup.add_child(this._widget);
 
         this._timeoutId = 0;
 
+        this._wsmPointerSelect = globalThis._wsmPointerSelectOpening === true;
         this._popupMode = opt.get('popupMode');
         this._popupDisabled = !opt.get('popupVisibility');
-        // if popup disabled don't allocate more resources
-        if (this._popupDisabled)
+        // if popup disabled don't allocate more resources (unless pointer-select session forces UI)
+        if (this._popupDisabled && !this._wsmPointerSelect)
             return;
 
         this._container = new St.BoxLayout({
@@ -338,12 +902,13 @@ const WorkspaceSwitcherPopupCustom = {
     },
 
     display(activeWorkspaceIndex = null) {
-        if (this._popupMode === wsPopupMode.DISABLE) {
-            // in this case the popup object will stay in Main.wm._workspaceSwitcherPopup and wil not be recreated each time as there is no content to update
+        if (!this._container)
             return;
-        }
 
         this._activeWorkspaceIndex = activeWorkspaceIndex;
+
+        if (this._wsmPointerSelect && this._list)
+            this._list._popupMode = wsPopupMode.ALL;
 
         this._setCustomStyle();
         this._setSpacing();
@@ -359,6 +924,18 @@ const WorkspaceSwitcherPopupCustom = {
 
         if (this._list._fitToScreenScale < 1)
             this._addLabels();
+
+        if (this._wsmPointerSelect)
+            _wsmAttachPointerSelectHandlers(this);
+
+        if (this._wsmPointerSelect)
+            _wsmBindEscToClose(this);
+
+        if (this._wsmPointerSelect)
+            _wsmPushPointerModal(this);
+
+        if (this._wsmPointerSelect)
+            _wsmAttachPointerDebugOverlay(this);
     },
 
     _redisplay() {
@@ -369,20 +946,27 @@ const WorkspaceSwitcherPopupCustom = {
         for (let i = 0; i < workspaceManager.n_workspaces; i++) {
             let indicator = null;
 
+            const showAllIndicators = this._wsmPointerSelect || this._popupMode === wsPopupMode.ALL;
+
             if (i === this._activeWorkspaceIndex)
                 indicator = new St.Bin({ style_class: 'ws-switcher-active' });
             // TODO single ws indicator needs to be handled in the container class, disabled for now
-            else if (this._popupMode === wsPopupMode.ALL)
+            else if (showAllIndicators)
                 indicator = new St.Bin({ style_class: 'ws-switcher-box' });
 
             if (indicator) {
                 // we need to know wsIndex of active box in single ws mode
                 indicator._wsIndex = i;
+                indicator.reactive = true;
+                indicator.track_hover = true;
                 this._list.add_child(indicator);
             }
         }
         this._setCustomStyle();
         this._addLabels();
+
+        if (this._wsmPointerSelect)
+            _wsmAttachPointerSelectHandlers(this);
     },
 
     _resetTimeout() {
@@ -390,11 +974,17 @@ const WorkspaceSwitcherPopupCustom = {
             GLib.source_remove(this._timeoutId);
             this._timeoutId = 0;
         }
+        if (this._wsmPointerSelect && _wsmPointerSessionPersistsUntilClick())
+            return;
         if (this._displayTimeout)
             this._timeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, this._displayTimeout, this._onTimeout.bind(this));
     },
 
     _onTimeout() {
+        if (this._wsmPointerSelect && _wsmPointerSessionPersistsUntilClick()) {
+            this._timeoutId = 0;
+            return GLib.SOURCE_REMOVE;
+        }
         // if user holds any modifier key, don't hide the popup and wait until they release the keys
         if (this._modifiersCancelTimeout) {
             const mods = global.get_pointer()[2];
@@ -414,6 +1004,10 @@ const WorkspaceSwitcherPopupCustom = {
     },
 
     _onDestroy() {
+        _wsmDestroyPointerDebugOverlay(this);
+        _wsmPopPointerModal(this);
+        _wsmDisconnectPointerSelectHandlers(this);
+        _wsmUnbindEsc(this);
         if (this._timeoutId)
             GLib.source_remove(this._timeoutId);
         this._timeoutId = 0;
@@ -480,8 +1074,14 @@ const WorkspaceSwitcherPopupCustom = {
         const children = this._list.get_children();
         for (let i = 0; i < children.length; i++) {
             const label = this._getCustomLabel(children[i]._wsIndex);
-            if (label)
+            if (label) {
                 children[i].set_child(label);
+                /* Labels stay non-reactive so picking hits the St.Bin tile (CSS :hover on
+                   .ws-switcher-*). Reactive children would steal hover with no matching styles.
+                   Pointer-select relies on modal + reactive fullscreen widget to absorb clicks
+                   outside tiles, not on reactive labels. */
+                _wsmMarkSubtreeNonReactive(label);
+            }
         }
     },
 
@@ -740,7 +1340,7 @@ class WorkspaceSwitcherPopupList extends St.Widget {
     }
 
     _getPreferredSizeForOrientation(_forSize) {
-        let workArea = Main.layoutManager.getWorkAreaForMonitor(Main.layoutManager.primaryIndex);
+        let workArea = _wsmWorkAreaForPopupSizing();
         let themeNode = this.get_theme_node();
 
         let availSize;
@@ -779,7 +1379,7 @@ class WorkspaceSwitcherPopupList extends St.Widget {
     }
 
     _getSizeForOppositeOrientation() {
-        let workArea = Main.layoutManager.getWorkAreaForMonitor(Main.layoutManager.primaryIndex);
+        let workArea = _wsmWorkAreaForPopupSizing();
 
         if (this._orientation === Clutter.Orientation.HORIZONTAL) {  // width scale option application
             this._childHeight = Math.round(this._childWidth * workArea.height / workArea.width / this._customWidthScale);
@@ -836,9 +1436,10 @@ class WorkspaceSwitcherPopupList extends St.Widget {
 
 const WorkspaceSwitcherPopupDefault = {
     after__init() {
+        this._wsmPointerSelect = globalThis._wsmPointerSelectOpening === true;
         this._popupDisabled = !opt.get('popupVisibility');
-        // if popup disabled don't allocate more resources
-        if (this._popupDisabled)
+        // if popup disabled don't allocate more resources (unless pointer-select session forces UI)
+        if (this._popupDisabled && !this._wsmPointerSelect)
             return;
 
         this.remove_constraint(this.get_constraints()[0]);
@@ -860,6 +1461,22 @@ const WorkspaceSwitcherPopupDefault = {
 
         if (this._list.vertical)
             this._list.add_style_class_name('ws-switcher-vertical');
+
+        this.connect('destroy', () => {
+            _wsmDestroyPointerDebugOverlay(this);
+            _wsmPopPointerModal(this);
+        });
+    },
+
+    after__redisplay() {
+        if (this._list) {
+            for (const child of this._list.get_children()) {
+                child.reactive = true;
+                child.track_hover = true;
+            }
+        }
+        if (this._wsmPointerSelect && this._list)
+            _wsmAttachPointerSelectHandlers(this);
     },
 
     _setPopupPosition() {
@@ -879,7 +1496,7 @@ const WorkspaceSwitcherPopupDefault = {
     },
 
     display(activeWorkspaceIndex) {
-        if (this._popupDisabled) {
+        if (this._popupDisabled && !this._wsmPointerSelect) {
             // in this case the popup object will stay in Main.wm._workspaceSwitcherPopup
             // and wil not be recreated each time as there is no content to update
             return;
@@ -887,11 +1504,17 @@ const WorkspaceSwitcherPopupDefault = {
 
         this._activeWorkspaceIndex = activeWorkspaceIndex;
 
+        if (this._wsmPointerSelect && this._list)
+            this._list._popupMode = wsPopupMode.ALL;
+
         this._redisplay();
         if (this._timeoutId)
             GLib.source_remove(this._timeoutId);
-        this._timeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, this._displayTimeout, this._onTimeout.bind(this));
-        GLib.Source.set_name_by_id(this._timeoutId, '[gnome-shell] this._onTimeout');
+        this._timeoutId = 0;
+        if (!(this._wsmPointerSelect && _wsmPointerSessionPersistsUntilClick())) {
+            this._timeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, this._displayTimeout, this._onTimeout.bind(this));
+            GLib.Source.set_name_by_id(this._timeoutId, '[gnome-shell] this._onTimeout');
+        }
 
         const duration = this.visible ? 0 : 100;
         this.show();
@@ -902,9 +1525,20 @@ const WorkspaceSwitcherPopupDefault = {
             mode: Clutter.AnimationMode.EASE_OUT_QUAD,
         });
         this._setPopupPosition();
+
+        if (this._wsmPointerSelect) {
+            this.reactive = true;
+            _wsmBindEscToClose(this);
+            _wsmPushPointerModal(this);
+            _wsmAttachPointerDebugOverlay(this);
+        }
     },
 
     _onTimeout() {
+        if (this._wsmPointerSelect && _wsmPointerSessionPersistsUntilClick()) {
+            this._timeoutId = 0;
+            return GLib.SOURCE_REMOVE;
+        }
         // if user holds any modifier key, don't hide the popup and wait until they release the keys
         if (this._modifiersCancelTimeout) {
             const mods = global.get_pointer()[2];
@@ -928,6 +1562,8 @@ const WorkspaceSwitcherPopupDefault = {
             GLib.source_remove(this._timeoutId);
             this._timeoutId = 0;
         }
+        if (this._wsmPointerSelect && _wsmPointerSessionPersistsUntilClick())
+            return;
         if (this._displayTimeout)
             this._timeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, this._displayTimeout, this._onTimeout.bind(this));
     },
