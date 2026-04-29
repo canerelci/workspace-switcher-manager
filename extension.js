@@ -997,15 +997,6 @@ const WorkspaceSwitcherPopupCustom = {
         this._inactiveBgColor = opt.get('popupInactiveBgColor');
         this._borderColor = opt.get('popupBorderColor');
 
-        this._activeShowWsIndex = opt.get('activeShowWsIndex');
-        this._activeShowWsName = opt.get('activeShowWsName');
-        this._activeShowAppName = opt.get('activeShowAppName');
-        this._activeShowWinTitle = opt.get('activeShowWinTitle');
-        this._inactiveShowWsIndex = opt.get('inactiveShowWsIndex');
-        this._inactiveShowWsName  = opt.get('inactiveShowWsName');
-        this._inactiveShowAppName = opt.get('inactiveShowAppName');
-        this._inactiveShowWinTitle = opt.get('inactiveShowWinTitle');
-
         this._widget.hide();
 
         let workspaceManager = global.workspace_manager;
@@ -1433,10 +1424,10 @@ const WorkspaceSwitcherPopupCustom = {
 
         const wsIndexIsActiveWS = wsIndex === this._activeWorkspaceIndex;
 
-        const showIndex = wsIndexIsActiveWS ? this._activeShowWsIndex  : this._inactiveShowWsIndex;
-        const showName  = wsIndexIsActiveWS ? this._activeShowWsName   : this._inactiveShowWsName;
-        const showApp   = wsIndexIsActiveWS ? this._activeShowAppName  : this._inactiveShowAppName;
-        const showTitle = wsIndexIsActiveWS ? this._activeShowWinTitle : this._inactiveShowWinTitle;
+        const showIndex = wsIndexIsActiveWS ? opt.get('activeShowWsIndex') : opt.get('inactiveShowWsIndex');
+        const showName  = wsIndexIsActiveWS ? opt.get('activeShowWsName')   : opt.get('inactiveShowWsName');
+        const showApp   = wsIndexIsActiveWS ? opt.get('activeShowAppName')  : opt.get('inactiveShowAppName');
+        const showTitle = wsIndexIsActiveWS ? opt.get('activeShowWinTitle') : opt.get('inactiveShowWinTitle');
 
         if (!(showIndex || showName || showApp || showTitle))
             return null;
