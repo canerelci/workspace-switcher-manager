@@ -43,6 +43,11 @@ const WSM_THUMB_TILE_MIN_PX = 252;
 /** Bottom strip reserved for workspace labels when thumbnails are shown (boosted font sizes). */
 const WSM_THUMB_LABEL_RESERVE_PX = 92;
 
+/**
+ * Reference workspace-tile width (px): `_childWidth / this ≈ 1` keeps legacy-ish label size; wider tiles bump `em` proportionally.
+ */
+const WSM_FONT_CARD_WIDTH_REF_PX = 196;
+
 const POINTER_SELECT_PRESETS = [
     ['<Super>w'],
 ];
@@ -107,15 +112,23 @@ function _wsmBuildWindowStackIndices() {
 }
 
 /**
- * Layout shrink factor alone makes labels tiny on wide layouts; scale gently with monitor short side.
+ * Label sizes use `em`; multiplier tracks allocated tile width (`WorkspaceSwitcherPopupList._childWidth`).
+ * `1120` was an old heuristic (≈1080p-class short side); replaced by width-based scaling.
  */
 function _wsmEffectiveFontFit(list) {
-    const wa = _wsmWorkAreaForPopupSizing();
-    const shortSide = Math.min(wa.width, wa.height);
     const fit = list._fitToScreenScale;
-    const ref = 1120;
-    const resBoost = Math.min(1.52, Math.max(0.9, shortSide / ref));
-    return fit * resBoost;
+    let cw = list._childWidth;
+    if (!(cw > 0)) {
+        const wa = _wsmWorkAreaForPopupSizing();
+        const nWs = Math.max(1, global.workspace_manager.n_workspaces);
+        const tiles = list._popupMode === wsPopupMode.ALL ? nWs : 1;
+        const cwScale = opt.get('popupWidthScale') / 100;
+        cw = ((wa.width - 80) / tiles) * cwScale;
+        cw = Math.max(48, cw);
+    }
+    const wBoost = cw / WSM_FONT_CARD_WIDTH_REF_PX;
+    const clamped = Math.min(2.05, Math.max(0.58, wBoost));
+    return fit * clamped;
 }
 
 /**
