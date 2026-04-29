@@ -614,7 +614,7 @@ function _getSizeTextOptionList(itemFactory) {
     // -----------------------------------------------------
     const boxHeightAdjustment = new Gtk.Adjustment({
         upper: 300,
-        lower: 10,
+        lower: 0,
         step_increment: 1,
         page_increment: 1,
     });
@@ -625,7 +625,7 @@ function _getSizeTextOptionList(itemFactory) {
     optionList.push(
         itemFactory.getRowWidget(
             _('WS Box Height Scale (%)'),
-            _('Adjusts vertical size of each workspace tile relative to the width-derived ratio. Values above 100 shorten tiles (less empty space below thumbnails); below 100 make them taller'),
+            _('With workspace thumbnails: inner top/bottom padding and gap above labels (0 = flush). Without thumbnails: still adjusts tile height vs width-derived ratio (above 100 shortens tiles).'),
             boxHeight,
             'popupHeightScale'
         )

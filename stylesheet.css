@@ -90,19 +90,23 @@
   max-width: 380px;
 }
 
+/* Thumbnail mode: monitor bezel on preview only; tiles use row height from JS */
+.workspace-switcher-custom.wsm-popup-workspace-thumbnails .ws-switcher-box,
+.workspace-switcher-custom.wsm-popup-workspace-thumbnails .ws-switcher-active {
+  border: none !important;
+  outline: none !important;
+  height: auto;
+  min-height: 0;
+}
+
 .wsm-workspace-thumbnail-clip {
-  border-radius: 6px;
+  border-radius: 8px;
+  /* Inset “bezel” without stealing layout space from the clone */
+  box-shadow: inset 0 0 0 2px rgba(230, 232, 242, 0.78);
+  background-color: rgba(5, 5, 10, 0.94);
 }
 
 /* WorkspaceThumbnail uses style_class workspace-thumbnail; theme/overview rules can hide clones outside Overview */
 .workspace-switcher-custom .workspace-thumbnail {
   opacity: 255;
-}
-
-/* Fixed pixel heights on tiles clip workspace thumbnails; grow tiles when previews are on. */
-.workspace-switcher-custom.wsm-popup-workspace-thumbnails .ws-switcher-box,
-.workspace-switcher-custom.wsm-popup-workspace-thumbnails .ws-switcher-active {
-  height: auto;
-  /* Room for preview + boosted label strip (extension.js WSM_THUMB_* constants). */
-  min-height: 252px;
 }

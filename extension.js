@@ -44,6 +44,14 @@ const WSM_THUMB_TILE_MIN_PX = 252;
 const WSM_THUMB_LABEL_RESERVE_PX = 92;
 
 /**
+ * Max vertical padding (top/bottom of tile content) at popup-height-scale 100%; scaled by height factor (0 => none).
+ */
+const WSM_THUMB_CARD_VPAD_MAX_PX = 14;
+
+/** Max gap between monitor frame and label stack at height-scale 100%; scaled same way. */
+const WSM_THUMB_THUMB_LABEL_GAP_MAX_PX = 8;
+
+/**
  * Reference workspace-tile width (px): `_childWidth / this ≈ 1` keeps legacy-ish label size; wider tiles bump `em` proportionally.
  */
 const WSM_FONT_CARD_WIDTH_REF_PX = 196;
@@ -111,9 +119,21 @@ function _wsmBuildWindowStackIndices() {
     return stackIndices;
 }
 
+/** WS Box Height Scale as 0…1 (prefs allow 0): inner vertical padding + thumb↔label gap scale together. */
+function _wsmThumbHeightScaleFactor() {
+    return Math.max(0, opt.get('popupHeightScale') / 100);
+}
+
+/** [padTop, gapThumbToLabel, padBottom] in px; all zero when height scale is 0. */
+function _wsmThumbCardVerticalInsets() {
+    const hs = _wsmThumbHeightScaleFactor();
+    const pad = Math.round(WSM_THUMB_CARD_VPAD_MAX_PX * hs);
+    const gap = Math.round(WSM_THUMB_THUMB_LABEL_GAP_MAX_PX * hs);
+    return [pad, gap, pad];
+}
+
 /**
- * Label sizes use `em`; multiplier tracks allocated tile width (`WorkspaceSwitcherPopupList._childWidth`).
- * `1120` was an old heuristic (≈1080p-class short side); replaced by width-based scaling.
+ * Combines shrink-to-fit with allocated tile width (`WorkspaceSwitcherPopupList._childWidth`).
  */
 function _wsmEffectiveFontFit(list) {
     const fit = list._fitToScreenScale;
@@ -179,6 +199,8 @@ function _wsmApplyPointerHoverTileStyles(popup, hoveredIdx) {
     const inactiveHoverBg = opt.get('popupInactiveHoverBgColor');
     const inactiveHoverBd = opt.get('popupInactiveHoverBorderColor');
     const activeGlow = opt.get('popupActiveHoverGlowColor');
+    const thumbTiles = opt.get('popupWorkspaceThumbnails');
+    const borderChrome = thumbTiles ? 'border: none; border-width: 0px; outline: none;' : '';
 
     const children = popup._list.get_children();
     const activeWs = popup._activeWorkspaceIndex;
@@ -200,7 +222,8 @@ function _wsmApplyPointerHoverTileStyles(popup, hoveredIdx) {
                                         background-color: ${popup._activeBgColor};
                                         border-color: ${popup._activeBgColor};
                                         filter: brightness(1.38) saturate(1.1);
-                                        box-shadow: 0 0 14px ${activeGlow}, 0 0 32px ${activeGlow};`);
+                                        box-shadow: 0 0 14px ${activeGlow}, 0 0 32px ${activeGlow};
+                                        ${borderChrome}`);
             } else {
                 ch.set_style(` background-size: ${bs}px;
                                         border-radius: ${br}px;
@@ -208,7 +231,8 @@ function _wsmApplyPointerHoverTileStyles(popup, hoveredIdx) {
                                         background-color: ${popup._activeBgColor};
                                         border-color: ${popup._activeBgColor};
                                         box-shadow: none;
-                                        filter: none;`);
+                                        filter: none;
+                                        ${borderChrome}`);
             }
         } else {
             let bg = popup._inactiveBgColor;
@@ -221,7 +245,8 @@ function _wsmApplyPointerHoverTileStyles(popup, hoveredIdx) {
                                         border-radius: ${br}px;
                                         color: ${popup._inactiveFgColor};
                                         background-color: ${bg};
-                                        border-color: ${bd};`);
+                                        border-color: ${bd};
+                                        ${borderChrome}`);
         }
     }
 }
@@ -997,6 +1022,15 @@ const WorkspaceSwitcherPopupCustom = {
         this._inactiveBgColor = opt.get('popupInactiveBgColor');
         this._borderColor = opt.get('popupBorderColor');
 
+        this._activeShowWsIndex = opt.get('activeShowWsIndex');
+        this._activeShowWsName = opt.get('activeShowWsName');
+        this._activeShowAppName = opt.get('activeShowAppName');
+        this._activeShowWinTitle = opt.get('activeShowWinTitle');
+        this._inactiveShowWsIndex = opt.get('inactiveShowWsIndex');
+        this._inactiveShowWsName  = opt.get('inactiveShowWsName');
+        this._inactiveShowAppName = opt.get('inactiveShowAppName');
+        this._inactiveShowWinTitle = opt.get('inactiveShowWinTitle');
+
         this._widget.hide();
 
         let workspaceManager = global.workspace_manager;
@@ -1180,6 +1214,7 @@ const WorkspaceSwitcherPopupCustom = {
         }
 
         const children = this._list.get_children();
+        const thumbTiles = opt.get('popupWorkspaceThumbnails');
         for (let i = 0; i < children.length; i++) {
             if (this._boxRadius === undefined) {
                 const theme = children[i].get_theme_node();
@@ -1188,20 +1223,25 @@ const WorkspaceSwitcherPopupCustom = {
                 this._boxHeight = Math.floor(theme.get_height() * this._popScale);
                 this._boxBgSize = Math.floor(theme.get_length('background-size') * this._popScale);
             }
+            const borderChrome = thumbTiles
+                ? 'border: none; border-width: 0px; outline: none;'
+                : '';
             if (i === this._activeWorkspaceIndex || this._popupMode) { // 0 all ws 1 single ws 2,3 will never get to here
                 children[i].set_style(` background-size: ${this._boxBgSize}px;
                                         border-radius: ${this._boxRadius}px;
                                         color: ${this._activeFgColor};
                                         background-color: ${this._activeBgColor};
                                         border-color: ${this._activeBgColor};
-                                        box-shadow: none;`
+                                        box-shadow: none;
+                                        ${borderChrome}`
                 );
             } else {
                 children[i].set_style(` background-size: ${this._boxBgSize}px;
                                         border-radius: ${this._boxRadius}px;
                                         color: ${this._inactiveFgColor};
                                         background-color: ${this._inactiveBgColor};
-                                        border-color: ${this._borderColor};`
+                                        border-color: ${this._borderColor};
+                                        ${borderChrome}`
                 );
             }
         }
@@ -1261,14 +1301,17 @@ const WorkspaceSwitcherPopupCustom = {
 
             const root = new St.BoxLayout({
                 vertical: true,
-                x_align: Clutter.ActorAlign.CENTER,
+                x_align: Clutter.ActorAlign.FILL,
                 y_align: Clutter.ActorAlign.START,
             });
+            const [padTop, gapLbl, padBot] = _wsmThumbCardVerticalInsets();
+            root.margin_top = padTop;
+            root.margin_bottom = padBot;
             if (thumbClip)
                 root.add_child(thumbClip);
             if (labelBox) {
                 if (thumbClip)
-                    labelBox.margin_top = Math.max(2, Math.floor(4 * this._popScale));
+                    labelBox.margin_top = gapLbl;
                 root.add_child(labelBox);
             }
 
@@ -1296,22 +1339,11 @@ const WorkspaceSwitcherPopupCustom = {
             tileW = Math.round(bh * geoAspect);
         }
 
-        /* Thumb must share one scale with WorkspaceThumbnail.setScale using THIS monitor's work area (picker matches _createWorkspaceThumbnailClip). */
-        const labelReservePx = WSM_THUMB_LABEL_RESERVE_PX;
-        const gapPx = 8;
-        const innerW = Math.max(48, Math.floor(tileW - 12));
-        const innerH = Math.max(48, Math.floor(tileH - labelReservePx - gapPx));
+        /* Full tile width; height matches work-area aspect (same for every workspace on this monitor). */
+        const innerW = Math.max(32, Math.floor(tileW));
+        const thumbH = Math.round(innerW * wa.height / wa.width);
 
-        let scale = Math.min(innerW / wa.width, innerH / wa.height);
-        /* Extremely small scales (~0.035) often produce blank clones on real drivers */
-        scale = Math.max(scale, 0.052);
-
-        let thumbW = Math.floor(wa.width * scale);
-        let thumbH = Math.floor(wa.height * scale);
-        thumbW = Math.min(thumbW, innerW);
-        thumbH = Math.min(thumbH, innerH);
-
-        return [thumbW, thumbH];
+        return [innerW, thumbH];
     },
 
     _createWorkspaceThumbnailClip(wsIndex, thumbW, thumbH) {
@@ -1424,10 +1456,10 @@ const WorkspaceSwitcherPopupCustom = {
 
         const wsIndexIsActiveWS = wsIndex === this._activeWorkspaceIndex;
 
-        const showIndex = wsIndexIsActiveWS ? opt.get('activeShowWsIndex') : opt.get('inactiveShowWsIndex');
-        const showName  = wsIndexIsActiveWS ? opt.get('activeShowWsName')   : opt.get('inactiveShowWsName');
-        const showApp   = wsIndexIsActiveWS ? opt.get('activeShowAppName')  : opt.get('inactiveShowAppName');
-        const showTitle = wsIndexIsActiveWS ? opt.get('activeShowWinTitle') : opt.get('inactiveShowWinTitle');
+        const showIndex = wsIndexIsActiveWS ? this._activeShowWsIndex  : this._inactiveShowWsIndex;
+        const showName  = wsIndexIsActiveWS ? this._activeShowWsName   : this._inactiveShowWsName;
+        const showApp   = wsIndexIsActiveWS ? this._activeShowAppName  : this._inactiveShowAppName;
+        const showTitle = wsIndexIsActiveWS ? this._activeShowWinTitle : this._inactiveShowWinTitle;
 
         if (!(showIndex || showName || showApp || showTitle))
             return null;
@@ -1718,15 +1750,35 @@ class WorkspaceSwitcherPopupList extends St.Widget {
         const cw = opt.get('popupWidthScale') / 100;
         const ch = Math.max(0.18, opt.get('popupHeightScale') / 100);
 
-        if (this._orientation === Clutter.Orientation.HORIZONTAL) {  // width scale option application
-            this._childHeight = Math.round(this._childWidth * workArea.height / workArea.width / cw / ch);
-            if (thumbs)
-                this._childHeight = Math.max(this._childHeight, minSide);
+        if (this._orientation === Clutter.Orientation.HORIZONTAL) {
+            let h;
+            if (thumbs) {
+                const waMon = Main.layoutManager.getWorkAreaForMonitor(Main.layoutManager.primaryIndex);
+                const [padTop, gap, padBot] = _wsmThumbCardVerticalInsets();
+                const thumbH = this._childWidth * waMon.height / waMon.width;
+                const contentMin = padTop + thumbH + gap + WSM_THUMB_LABEL_RESERVE_PX + padBot;
+                const baseAspect = Math.round(this._childWidth * workArea.height / workArea.width / cw);
+                h = Math.max(baseAspect, Math.ceil(contentMin), minSide);
+            } else {
+                h = Math.round(this._childWidth * workArea.height / workArea.width / cw / ch);
+            }
+            this._childHeight = h;
             return [this._childHeight, this._childHeight];
         } else {
-            this._childWidth = Math.round(this._childHeight * workArea.width / workArea.height * cw / ch);
-            if (thumbs)
-                this._childWidth = Math.max(this._childWidth, minSide);
+            let w = Math.round(this._childHeight * workArea.width / workArea.height * cw / ch);
+            if (thumbs) {
+                const waMon = Main.layoutManager.getWorkAreaForMonitor(Main.layoutManager.primaryIndex);
+                const [padTop, gap, padBot] = _wsmThumbCardVerticalInsets();
+                const thumbH = w * waMon.height / waMon.width;
+                const needH = padTop + thumbH + gap + WSM_THUMB_LABEL_RESERVE_PX + padBot;
+                if (needH > this._childHeight) {
+                    const inner = this._childHeight - padTop - gap - WSM_THUMB_LABEL_RESERVE_PX - padBot;
+                    const wMax = inner * waMon.width / waMon.height;
+                    w = Math.min(w, Math.floor(wMax));
+                }
+                w = Math.max(w, minSide);
+            }
+            this._childWidth = w;
             return [this._childWidth, this._childWidth];
         }
     }
