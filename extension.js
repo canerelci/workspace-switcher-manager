@@ -37,11 +37,8 @@ const wsPopupMode = {
     DEFAULT: 2,
 };
 
-/** Min tile size (px, before popupScale) so thumbnails can fill the card; paired with CSS min-height. */
-const WSM_THUMB_TILE_MIN_PX = 252;
-
-/** Bottom strip reserved for workspace labels when thumbnails are shown (boosted font sizes). */
-const WSM_THUMB_LABEL_RESERVE_PX = 92;
+/** Rough label strip height budget for layout (multi-line); WS Box Height Scale adds padding on top of this. */
+const WSM_THUMB_LABEL_RESERVE_PX = 52;
 
 /**
  * Max vertical padding (top/bottom of tile content) at popup-height-scale 100%; scaled by height factor (0 => none).
@@ -1124,10 +1121,18 @@ const WorkspaceSwitcherPopupCustom = {
             const showAllIndicators = this._wsmPointerSelect || this._popupMode === wsPopupMode.ALL;
 
             if (i === this._activeWorkspaceIndex)
-                indicator = new St.Bin({ style_class: 'ws-switcher-active' });
+                indicator = new St.Bin({
+                    style_class: 'ws-switcher-active',
+                    y_align: Clutter.ActorAlign.START,
+                    x_align: Clutter.ActorAlign.FILL,
+                });
             // TODO single ws indicator needs to be handled in the container class, disabled for now
             else if (showAllIndicators)
-                indicator = new St.Bin({ style_class: 'ws-switcher-box' });
+                indicator = new St.Bin({
+                    style_class: 'ws-switcher-box',
+                    y_align: Clutter.ActorAlign.START,
+                    x_align: Clutter.ActorAlign.FILL,
+                });
 
             if (indicator) {
                 // we need to know wsIndex of active box in single ws mode
@@ -1749,7 +1754,6 @@ class WorkspaceSwitcherPopupList extends St.Widget {
     _getSizeForOppositeOrientation() {
         let workArea = _wsmWorkAreaForPopupSizing();
         const thumbs = this.has_style_class_name('wsm-popup-workspace-thumbnails');
-        const minSide = Math.round(WSM_THUMB_TILE_MIN_PX * (this._popScale ?? 1));
         const cw = opt.get('popupWidthScale') / 100;
         const ch = Math.max(0.18, opt.get('popupHeightScale') / 100);
 
@@ -1760,8 +1764,7 @@ class WorkspaceSwitcherPopupList extends St.Widget {
                 const [padTop, gap, padBot] = _wsmThumbCardVerticalInsets();
                 const thumbH = this._childWidth * waFrame.height / waFrame.width;
                 const contentMin = padTop + thumbH + gap + WSM_THUMB_LABEL_RESERVE_PX + padBot;
-                const baseAspect = Math.round(this._childWidth * workArea.height / workArea.width / cw);
-                h = Math.max(baseAspect, Math.ceil(contentMin), minSide);
+                h = Math.ceil(contentMin);
             } else {
                 h = Math.round(this._childWidth * workArea.height / workArea.width / cw / ch);
             }
@@ -1779,7 +1782,6 @@ class WorkspaceSwitcherPopupList extends St.Widget {
                     const wMax = inner * waFrame.width / waFrame.height;
                     w = Math.min(w, Math.floor(wMax));
                 }
-                w = Math.max(w, minSide);
             }
             this._childWidth = w;
             return [this._childWidth, this._childWidth];
