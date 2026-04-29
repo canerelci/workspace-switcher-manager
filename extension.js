@@ -690,6 +690,14 @@ function _wsmWorkAreaForPopupSizing() {
     return Main.layoutManager.getWorkAreaForMonitor(monIdx);
 }
 
+/**
+ * Thumbnail *frame* size (same for every tile): this monitor’s aspect — must match popup sizing work area
+ * so tiles align. Per-workspace WorkspaceThumbnail still uses `_wsmPickMonitorIndexForThumbnail` for clones.
+ */
+function _wsmThumbnailFrameWorkArea() {
+    return _wsmWorkAreaForPopupSizing();
+}
+
 
 export default class WSM extends Extension {
     enable() {
@@ -1320,28 +1328,23 @@ const WorkspaceSwitcherPopupCustom = {
         }
     },
 
-    _getThumbnailClipDimensions(wsIndex) {
-        const ws = global.workspace_manager.get_workspace_by_index(wsIndex);
-        const fallbackMon = this._monitorOption === 0
-            ? Main.layoutManager.primaryIndex
-            : global.display.get_current_monitor();
-        const monIdx = ws ? _wsmPickMonitorIndexForThumbnail(ws, fallbackMon) : fallbackMon;
-        const wa = Main.layoutManager.getWorkAreaForMonitor(monIdx);
+    _getThumbnailClipDimensions(_wsIndex) {
+        const waFrame = _wsmThumbnailFrameWorkArea();
 
         const list = this._list;
         let tileW = list._childWidth;
         let tileH = list._childHeight;
 
         if (!tileW || !tileH) {
-            const geoAspect = wa.width / wa.height * (opt.get('popupWidthScale') / 100);
+            const geoAspect = waFrame.width / waFrame.height * (opt.get('popupWidthScale') / 100);
             const bh = this._boxHeight || Math.round(80 * this._popScale);
             tileH = bh;
             tileW = Math.round(bh * geoAspect);
         }
 
-        /* Full tile width; height matches work-area aspect (same for every workspace on this monitor). */
+        /* Same inner box for every workspace: frame aspect = popup monitor work area (not per-ws monitor). */
         const innerW = Math.max(32, Math.floor(tileW));
-        const thumbH = Math.round(innerW * wa.height / wa.width);
+        const thumbH = Math.round(innerW * waFrame.height / waFrame.width);
 
         return [innerW, thumbH];
     },
@@ -1380,7 +1383,7 @@ const WorkspaceSwitcherPopupCustom = {
         }
 
         const nClones = thumbnail._windows?.length ?? 0;
-        _wsmThumbJournal(`ws=${wsIndex} mon=${monIdx} wa=${wa.width}x${wa.height} thumb=${thumbW}x${thumbH} scale=${scale.toFixed(4)} clones=${nClones}`);
+        _wsmThumbJournal(`ws=${wsIndex} frame=${thumbW}x${thumbH} content_mon=${monIdx} wa=${wa.width}x${wa.height} scale=${scale.toFixed(4)} clones=${nClones}`);
 
         const clip = new WorkspaceSwitcherManagerThumbnailClip();
         _wsmThumbnailPresentationHints(clip);
@@ -1753,9 +1756,9 @@ class WorkspaceSwitcherPopupList extends St.Widget {
         if (this._orientation === Clutter.Orientation.HORIZONTAL) {
             let h;
             if (thumbs) {
-                const waMon = Main.layoutManager.getWorkAreaForMonitor(Main.layoutManager.primaryIndex);
+                const waFrame = _wsmThumbnailFrameWorkArea();
                 const [padTop, gap, padBot] = _wsmThumbCardVerticalInsets();
-                const thumbH = this._childWidth * waMon.height / waMon.width;
+                const thumbH = this._childWidth * waFrame.height / waFrame.width;
                 const contentMin = padTop + thumbH + gap + WSM_THUMB_LABEL_RESERVE_PX + padBot;
                 const baseAspect = Math.round(this._childWidth * workArea.height / workArea.width / cw);
                 h = Math.max(baseAspect, Math.ceil(contentMin), minSide);
@@ -1767,13 +1770,13 @@ class WorkspaceSwitcherPopupList extends St.Widget {
         } else {
             let w = Math.round(this._childHeight * workArea.width / workArea.height * cw / ch);
             if (thumbs) {
-                const waMon = Main.layoutManager.getWorkAreaForMonitor(Main.layoutManager.primaryIndex);
+                const waFrame = _wsmThumbnailFrameWorkArea();
                 const [padTop, gap, padBot] = _wsmThumbCardVerticalInsets();
-                const thumbH = w * waMon.height / waMon.width;
+                const thumbH = w * waFrame.height / waFrame.width;
                 const needH = padTop + thumbH + gap + WSM_THUMB_LABEL_RESERVE_PX + padBot;
                 if (needH > this._childHeight) {
                     const inner = this._childHeight - padTop - gap - WSM_THUMB_LABEL_RESERVE_PX - padBot;
-                    const wMax = inner * waMon.width / waMon.height;
+                    const wMax = inner * waFrame.width / waFrame.height;
                     w = Math.min(w, Math.floor(wMax));
                 }
                 w = Math.max(w, minSide);
