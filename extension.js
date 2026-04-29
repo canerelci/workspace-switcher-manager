@@ -15,6 +15,7 @@ import St from 'gi://St';
 import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 import GObject from 'gi://GObject';
+import Pango from 'gi://Pango';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
@@ -37,8 +38,58 @@ const wsPopupMode = {
     DEFAULT: 2,
 };
 
-/** Rough label strip height budget for layout (multi-line); WS Box Height Scale adds padding on top of this. */
+/** Fixed px reserve for label strip in layout math — used only when thumbnails + any Content text toggle is on. */
 const WSM_THUMB_LABEL_RESERVE_PX = 52;
+
+/** Any Content → workspace indicator text toggle on (used for thumbnail label strip reserve). */
+function _wsmAnyThumbContentLabelEnabled() {
+    return !!(opt.get('activeShowWsIndex') || opt.get('activeShowWsName') ||
+        opt.get('activeShowAppName') || opt.get('activeShowWinTitle') ||
+        opt.get('inactiveShowWsIndex') || opt.get('inactiveShowWsName') ||
+        opt.get('inactiveShowAppName') || opt.get('inactiveShowWinTitle'));
+}
+
+/** Label-strip height for layout: only when thumbnails + at least one text toggle (otherwise no reserved band). */
+function _wsmThumbLabelReserveHeightPx() {
+    if (!opt.get('popupWorkspaceThumbnails'))
+        return 0;
+    if (!_wsmAnyThumbContentLabelEnabled())
+        return 0;
+    return WSM_THUMB_LABEL_RESERVE_PX;
+}
+
+/** Darken `rgb()` / `rgba()` strings for idle tile borders (factor 0…1). */
+function _wsmDimCssColor(css, factor) {
+    if (!css || typeof css !== 'string' || factor >= 0.999)
+        return css;
+    const m = css.trim().match(/^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*([\d.]+))?\s*\)$/i);
+    if (!m)
+        return css;
+    const r = Math.round(Math.min(255, parseFloat(m[1]) * factor));
+    const g = Math.round(Math.min(255, parseFloat(m[2]) * factor));
+    const b = Math.round(Math.min(255, parseFloat(m[3]) * factor));
+    if (m[4] !== undefined)
+        return `rgba(${r},${g},${b},${m[4]})`;
+    return `rgb(${r},${g},${b})`;
+}
+
+function _wsmThumbPrepareLabelsForFixedStrip(actor) {
+    if (!actor)
+        return;
+    if (actor instanceof St.Label) {
+        const ct = actor.clutter_text;
+        if (ct) {
+            ct.line_wrap = true;
+            ct.ellipsize = Pango.EllipsizeMode.END;
+        }
+        return;
+    }
+    const ch = actor.get_children?.();
+    if (!ch)
+        return;
+    for (let i = 0; i < ch.length; i++)
+        _wsmThumbPrepareLabelsForFixedStrip(ch[i]);
+}
 
 /**
  * Max vertical padding (top/bottom of tile content) at popup-height-scale 100%; scaled by height factor (0 => none).
@@ -48,13 +99,19 @@ const WSM_THUMB_CARD_VPAD_MAX_PX = 14;
 /** Max gap between monitor frame and label stack at height-scale 100%; scaled same way. */
 const WSM_THUMB_THUMB_LABEL_GAP_MAX_PX = 8;
 
+/** Inset between clip edge and scaled WorkspaceThumbnail (px per side); inset box-shadow draws on clip edge — pad avoids bezel overlapping clone. */
+const WSM_THUMB_CLIP_INSET_PX = 2;
+
 /**
  * Reference workspace-tile width (px): `_childWidth / this ≈ 1` keeps legacy-ish label size; wider tiles bump `em` proportionally.
  */
 const WSM_FONT_CARD_WIDTH_REF_PX = 196;
 
+/** Presets sync with prefs `_syncPointerPresetAccelerator` (same order). Each entry is one or more GTK accelerators for the same handler. */
 const POINTER_SELECT_PRESETS = [
+    ['<Super>w', '<Super>Tab'],
     ['<Super>w'],
+    ['<Super>Tab'],
 ];
 
 /** Pointer-select diagnostics → journal: `journalctl --user -f -g WSM-pointer` (no ripgrep needed) */
@@ -121,11 +178,12 @@ function _wsmThumbHeightScaleFactor() {
     return Math.max(0, opt.get('popupHeightScale') / 100);
 }
 
-/** [padTop, gapThumbToLabel, padBottom] in px; all zero when height scale is 0. */
+/** [padTop, gapThumbToLabel, padBottom] in px; scaled by WS Box Height Scale and Popup → Padding scale. */
 function _wsmThumbCardVerticalInsets() {
     const hs = _wsmThumbHeightScaleFactor();
-    const pad = Math.round(WSM_THUMB_CARD_VPAD_MAX_PX * hs);
-    const gap = Math.round(WSM_THUMB_THUMB_LABEL_GAP_MAX_PX * hs);
+    const padScale = Math.max(0, opt.get('popupPaddingScale') / 100);
+    const pad = Math.round(WSM_THUMB_CARD_VPAD_MAX_PX * hs * padScale);
+    const gap = Math.round(WSM_THUMB_THUMB_LABEL_GAP_MAX_PX * hs * padScale);
     return [pad, gap, pad];
 }
 
@@ -140,7 +198,7 @@ function _wsmEffectiveFontFit(list) {
         const nWs = Math.max(1, global.workspace_manager.n_workspaces);
         const tiles = list._popupMode === wsPopupMode.ALL ? nWs : 1;
         const cwScale = opt.get('popupWidthScale') / 100;
-        cw = ((wa.width - 80) / tiles) * cwScale;
+        cw = (wa.width / tiles) * cwScale;
         cw = Math.max(48, cw);
     }
     const wBoost = cw / WSM_FONT_CARD_WIDTH_REF_PX;
@@ -195,7 +253,6 @@ function _wsmApplyPointerHoverTileStyles(popup, hoveredIdx) {
 
     const inactiveHoverBg = opt.get('popupInactiveHoverBgColor');
     const inactiveHoverBd = opt.get('popupInactiveHoverBorderColor');
-    const activeGlow = opt.get('popupActiveHoverGlowColor');
     const thumbTiles = opt.get('popupWorkspaceThumbnails');
     const borderChrome = thumbTiles ? 'border: none; border-width: 0px; outline: none;' : '';
 
@@ -203,49 +260,96 @@ function _wsmApplyPointerHoverTileStyles(popup, hoveredIdx) {
     const activeWs = popup._activeWorkspaceIndex;
     const pm = popup._popupMode;
 
+    const inactiveBdIdle = _wsmDimCssColor(popup._borderColor, 0.55);
+    const activeBdIdle = _wsmDimCssColor(popup._activeBgColor, 0.88);
+    const activeRingDim = _wsmDimCssColor(popup._activeBgColor, 0.92);
+
     for (let i = 0; i < children.length; i++) {
-        const ch = children[i];
-        const useActiveStyle = i === activeWs || pm;
-        const isHover = hoveredIdx !== null && ch._wsIndex === hoveredIdx;
+            const ch = children[i];
+            const useActiveStyle = i === activeWs || pm;
+            const isHover = hoveredIdx !== null && ch._wsIndex === hoveredIdx;
 
-        const bs = popup._boxBgSize;
-        const br = popup._boxRadius;
+            const bs = popup._boxBgSize;
+            const br = popup._boxRadius;
 
-        if (useActiveStyle) {
-            if (isHover) {
-                ch.set_style(` background-size: ${bs}px;
+            if (thumbTiles) {
+                if (useActiveStyle) {
+                    if (isHover) {
+                        ch.set_style(` background-size: ${bs}px;
                                         border-radius: ${br}px;
                                         color: ${popup._activeFgColor};
-                                        background-color: ${popup._activeBgColor};
-                                        border-color: ${popup._activeBgColor};
-                                        filter: brightness(1.38) saturate(1.1);
-                                        box-shadow: 0 0 14px ${activeGlow}, 0 0 32px ${activeGlow};
+                                        background-color: transparent;
+                                        border-color: transparent;
+                                        box-shadow: 0 0 0 2px ${popup._activeBgColor};
+                                        filter: brightness(1.08);
                                         ${borderChrome}`);
-            } else {
-                ch.set_style(` background-size: ${bs}px;
+                    } else {
+                        ch.set_style(` background-size: ${bs}px;
                                         border-radius: ${br}px;
                                         color: ${popup._activeFgColor};
-                                        background-color: ${popup._activeBgColor};
-                                        border-color: ${popup._activeBgColor};
+                                        background-color: transparent;
+                                        border-color: transparent;
+                                        box-shadow: 0 0 0 2px ${activeRingDim};
+                                        filter: none;
+                                        ${borderChrome}`);
+                    }
+                } else if (isHover) {
+                    ch.set_style(` background-size: ${bs}px;
+                                        border-radius: ${br}px;
+                                        color: ${popup._inactiveFgColor};
+                                        background-color: ${inactiveHoverBg};
+                                        border-color: transparent;
+                                        box-shadow: 0 0 0 2px ${inactiveHoverBd};
+                                        filter: none;
+                                        ${borderChrome}`);
+                } else {
+                    ch.set_style(` background-size: ${bs}px;
+                                        border-radius: ${br}px;
+                                        color: ${popup._inactiveFgColor};
+                                        background-color: transparent;
+                                        border-color: transparent;
                                         box-shadow: none;
                                         filter: none;
                                         ${borderChrome}`);
+                }
+                continue;
             }
-        } else {
-            let bg = popup._inactiveBgColor;
-            let bd = popup._borderColor;
-            if (isHover) {
-                bg = inactiveHoverBg;
-                bd = inactiveHoverBd;
-            }
-            ch.set_style(` background-size: ${bs}px;
+
+            if (useActiveStyle) {
+                if (isHover) {
+                    ch.set_style(` background-size: ${bs}px;
+                                        border-radius: ${br}px;
+                                        color: ${popup._activeFgColor};
+                                        background-color: ${popup._activeBgColor};
+                                        border-color: ${popup._activeBgColor};
+                                        filter: brightness(1.1);
+                                        box-shadow: none;
+                                        ${borderChrome}`);
+                } else {
+                    ch.set_style(` background-size: ${bs}px;
+                                        border-radius: ${br}px;
+                                        color: ${popup._activeFgColor};
+                                        background-color: ${popup._activeBgColor};
+                                        border-color: ${activeBdIdle};
+                                        box-shadow: none;
+                                        filter: none;
+                                        ${borderChrome}`);
+                }
+            } else {
+                let bg = popup._inactiveBgColor;
+                let bd = inactiveBdIdle;
+                if (isHover) {
+                    bg = inactiveHoverBg;
+                    bd = inactiveHoverBd;
+                }
+                ch.set_style(` background-size: ${bs}px;
                                         border-radius: ${br}px;
                                         color: ${popup._inactiveFgColor};
                                         background-color: ${bg};
                                         border-color: ${bd};
                                         ${borderChrome}`);
+            }
         }
-    }
 }
 
 /** Hover highlight: pick under pointer finds tile (enter/hover often broken under modal). */
@@ -679,12 +783,17 @@ function _wsmAttachPointerDebugOverlay(popup) {
 }
 
 
-/** Work area used to clamp workspace-switcher list size (matches monitor preference: primary vs current). */
+/** Work area used for list sizing and popup placement (matches General → Monitor; excludes panels/docks). */
 function _wsmWorkAreaForPopupSizing() {
     const monIdx = opt.get('monitor') === 0
         ? Main.layoutManager.primaryIndex
         : global.display.get_current_monitor();
     return Main.layoutManager.getWorkAreaForMonitor(monIdx);
+}
+
+/** Alias for `_setPopupPosition`: anchor rectangle for the visible strip (stage coords). */
+function _wsmPopupAnchorWorkArea() {
+    return _wsmWorkAreaForPopupSizing();
 }
 
 /**
@@ -908,6 +1017,7 @@ export default class WSM extends Extension {
         _wsmDiagLog(`pointer keybinding enabled=${enabled} accelerator=${accels.join(', ')}`);
         if (!enabled)
             return;
+        /* Shell registers every string in the strv; matched accelerators are handled here first (no propagation to other Shell handlers). */
         Main.wm.addKeybinding(
             'pointer-workspace-select-accelerator',
             this.getSettings(),
@@ -1219,10 +1329,11 @@ const WorkspaceSwitcherPopupCustom = {
             let contPadding = this._widget.get_theme_node().get_length('padding') || 10;
             contPadding = Math.max(contPadding * this._popScale, 2);
             this._contPadding = Math.floor(contPadding * this._paddingScale);
+            const contBd = _wsmDimCssColor(this._borderColor, 0.55);
             this._container.set_style(`padding: ${this._contPadding}px;
                                            border-radius: ${this._contRadius}px;
                                            background-color: ${this._bgColor};
-                                           border-color: ${this._borderColor};`
+                                           border-color: ${contBd};`
             );
         }
 
@@ -1239,12 +1350,37 @@ const WorkspaceSwitcherPopupCustom = {
             const borderChrome = thumbTiles
                 ? 'border: none; border-width: 0px; outline: none;'
                 : '';
-            if (i === this._activeWorkspaceIndex || this._popupMode) { // 0 all ws 1 single ws 2,3 will never get to here
+            const inactiveBdIdle = _wsmDimCssColor(this._borderColor, 0.55);
+            const activeBdIdle = _wsmDimCssColor(this._activeBgColor, 0.88);
+            const activeRingDim = _wsmDimCssColor(this._activeBgColor, 0.92);
+            /* Thumbnail tiles: no full-bleed background (avoids solid color band under the preview when labels are off). */
+            if (thumbTiles) {
+                if (i === this._activeWorkspaceIndex || this._popupMode) {
+                    children[i].set_style(` background-size: ${this._boxBgSize}px;
+                                            border-radius: ${this._boxRadius}px;
+                                            color: ${this._activeFgColor};
+                                            background-color: transparent;
+                                            border-color: transparent;
+                                            box-shadow: 0 0 0 2px ${activeRingDim};
+                                            filter: none;
+                                            ${borderChrome}`
+                    );
+                } else {
+                    children[i].set_style(` background-size: ${this._boxBgSize}px;
+                                            border-radius: ${this._boxRadius}px;
+                                            color: ${this._inactiveFgColor};
+                                            background-color: transparent;
+                                            border-color: transparent;
+                                            box-shadow: none;
+                                            ${borderChrome}`
+                    );
+                }
+            } else if (i === this._activeWorkspaceIndex || this._popupMode) {
                 children[i].set_style(` background-size: ${this._boxBgSize}px;
                                         border-radius: ${this._boxRadius}px;
                                         color: ${this._activeFgColor};
                                         background-color: ${this._activeBgColor};
-                                        border-color: ${this._activeBgColor};
+                                        border-color: ${activeBdIdle};
                                         box-shadow: none;
                                         ${borderChrome}`
                 );
@@ -1253,7 +1389,7 @@ const WorkspaceSwitcherPopupCustom = {
                                         border-radius: ${this._boxRadius}px;
                                         color: ${this._inactiveFgColor};
                                         background-color: ${this._inactiveBgColor};
-                                        border-color: ${this._borderColor};
+                                        border-color: ${inactiveBdIdle};
                                         ${borderChrome}`
                 );
             }
@@ -1306,10 +1442,12 @@ const WorkspaceSwitcherPopupCustom = {
                 continue;
             }
 
+            const lblReserve = _wsmThumbLabelReserveHeightPx();
+
             const [thumbW, thumbH] = this._getThumbnailClipDimensions(wsIdx);
             const thumbClip = this._createWorkspaceThumbnailClip(wsIdx, thumbW, thumbH);
 
-            if (!thumbClip && !labelBox)
+            if (!thumbClip && !labelBox && lblReserve === 0)
                 continue;
 
             const root = new St.BoxLayout({
@@ -1320,12 +1458,28 @@ const WorkspaceSwitcherPopupCustom = {
             const [padTop, gapLbl, padBot] = _wsmThumbCardVerticalInsets();
             root.margin_top = padTop;
             root.margin_bottom = padBot;
+
+            const innerH = Math.max(0, list._childHeight - padTop - padBot);
+            const gapBeforeLabel = thumbClip && lblReserve > 0 ? gapLbl : 0;
+            const labelSlotH = lblReserve > 0 ? Math.max(0, innerH - thumbH - gapBeforeLabel) : 0;
+
             if (thumbClip)
                 root.add_child(thumbClip);
-            if (labelBox) {
+
+            if (lblReserve > 0) {
+                const labelBin = new St.Bin({
+                    x_align: Clutter.ActorAlign.FILL,
+                    y_align: Clutter.ActorAlign.CENTER,
+                });
+                labelBin.clip_to_allocation = true;
                 if (thumbClip)
-                    labelBox.margin_top = gapLbl;
-                root.add_child(labelBox);
+                    labelBin.margin_top = gapLbl;
+                labelBin.set_style(`height: ${labelSlotH}px; min-height: ${labelSlotH}px;`);
+                if (labelBox) {
+                    labelBin.set_child(labelBox);
+                    _wsmThumbPrepareLabelsForFixedStrip(labelBox);
+                }
+                root.add_child(labelBin);
             }
 
             children[i].set_child(root);
@@ -1368,15 +1522,18 @@ const WorkspaceSwitcherPopupCustom = {
         _wsmThumbnailPresentationHints(thumbnail);
 
         const wa = Main.layoutManager.getWorkAreaForMonitor(monIdx);
-        const scale = Math.min(thumbW / wa.width, thumbH / wa.height);
+        const inset = WSM_THUMB_CLIP_INSET_PX;
+        const pw = Math.max(1, thumbW - 2 * inset);
+        const ph = Math.max(1, thumbH - 2 * inset);
+        const scale = Math.min(pw / wa.width, ph / wa.height);
 
         /* Same as overview ThumbnailsBox: scale the internal viewport, not the root actor. */
         thumbnail.setScale(scale, scale);
 
         const dispW = Math.round(wa.width * scale);
         const dispH = Math.round(wa.height * scale);
-        const ox = Math.floor((thumbW - dispW) / 2);
-        const oy = Math.floor((thumbH - dispH) / 2);
+        const ox = inset + Math.floor((pw - dispW) / 2);
+        const oy = inset + Math.floor((ph - dispH) / 2);
 
         thumbnail.opacity = 255;
         thumbnail.show();
@@ -1429,20 +1586,21 @@ const WorkspaceSwitcherPopupCustom = {
         }
     },
 
+    /**
+     * Positions the strip inside `_wsmPopupAnchorWorkArea()` using Pop-up → Horizontal / Vertical %.
+     * `_widget` stays full-stage at (0,0) for modal/input; only `_container` moves (work-area coords).
+     */
     _setPopupPosition() {
-        let workArea;
-        if (this._monitorOption === 0)
-            workArea = global.display.get_monitor_geometry(Main.layoutManager.primaryIndex);
-        else
-            workArea = global.display.get_monitor_geometry(global.display.get_current_monitor());
-
-
-        let [, natHeight] = this._container.get_preferred_height(global.screen_width);
+        const wa = _wsmPopupAnchorWorkArea();
+        const listTn = this._list.get_theme_node();
+        const forW = wa.width - listTn.get_horizontal_padding();
+        let [, natHeight] = this._container.get_preferred_height(forW);
         let [, natWidth] = this._container.get_preferred_width(natHeight);
         let h = this._horizontalPosition;
         let v = this._verticalPosition;
-        this._widget.x = workArea.x + Math.floor((workArea.width - natWidth) * h);
-        this._widget.y = workArea.y + Math.floor((workArea.height - natHeight) * v);
+        this._widget.set_position(0, 0);
+        this._container.x = wa.x + Math.floor((wa.width - natWidth) * h);
+        this._container.y = wa.y + Math.floor((wa.height - natHeight) * v);
     },
 
     _getWsNamesSettings() {
@@ -1473,7 +1631,8 @@ const WorkspaceSwitcherPopupCustom = {
             return null;
 
         const thumbLabels = opt.get('popupWorkspaceThumbnails');
-        const labelFsBoost = thumbLabels ? 1.48 : 1;
+        /* Under-preview captions: smaller than standalone text tiles (legacy boost was meant for text-only mode). */
+        const labelFsBoost = thumbLabels ? 0.78 : 1;
         const labelFit = _wsmEffectiveFontFit(this._list);
         const padScale = opt.get('popupLabelPaddingScale') / 100;
         const hPadEm = 0.5 * padScale;
@@ -1721,6 +1880,44 @@ class WorkspaceSwitcherPopupList extends St.Widget {
             availSize = workArea.height - themeNode.get_vertical_padding();
 
         const cw = opt.get('popupWidthScale') / 100;
+        const ch = Math.max(0.18, opt.get('popupHeightScale') / 100);
+
+        let workspaceManager = global.workspace_manager;
+        let spacing = this._itemSpacing * (this._popupMode !== wsPopupMode.ALL ? 0 : workspaceManager.n_workspaces - 1);
+
+        const thumbs = this.has_style_class_name('wsm-popup-workspace-thumbnails');
+        const tiles = Math.max(1, this._popupMode !== wsPopupMode.ALL ? 1 : workspaceManager.n_workspaces);
+        const ps = this._popScale > 0 ? this._popScale : 1;
+
+        /**
+         * Workspace thumbnails were added later; legacy sizing summed each tile's text natural height.
+         * Empty St.Bins (no labels yet / labels disabled) report ~0 — collapse tile width and break layout.
+         */
+        if (thumbs) {
+            let size;
+            /* Use content-axis budget (`availSize`), not `workArea - 80`. Legacy -80 shrank the strip ~80px at 100% scale so users raised Global / Width scale (~110%) to compensate. */
+            const inner = Math.max(0, availSize - spacing);
+            if (this._orientation === Clutter.Orientation.HORIZONTAL) {
+                let tileW = (inner / tiles) * cw * ps;
+                tileW = Math.max(48, tileW);
+                size = tileW * tiles + spacing;
+            } else {
+                let tileH = (inner / tiles) * ch * ps;
+                tileH = Math.max(48, tileH);
+                size = tileH * tiles + spacing;
+            }
+
+            this._fitToScreenScale = size > availSize ? availSize / size : 1;
+            size = Math.min(size, availSize);
+
+            if (this._orientation === Clutter.Orientation.HORIZONTAL) {
+                this._childWidth = (size - spacing) / tiles;
+                return themeNode.adjust_preferred_width(size, size);
+            } else {
+                this._childHeight = (size - spacing) / tiles;
+                return themeNode.adjust_preferred_height(size, size);
+            }
+        }
 
         let size = 0;
         for (let child of this.get_children()) {
@@ -1733,8 +1930,6 @@ class WorkspaceSwitcherPopupList extends St.Widget {
                 size += height;
         }
 
-        let workspaceManager = global.workspace_manager;
-        let spacing = this._itemSpacing * (this._popupMode !== wsPopupMode.ALL ? 0 : workspaceManager.n_workspaces - 1);
         size += spacing;
 
         // note info about downsizing the popup to calculate proper content size
@@ -1762,8 +1957,10 @@ class WorkspaceSwitcherPopupList extends St.Widget {
             if (thumbs) {
                 const waFrame = _wsmThumbnailFrameWorkArea();
                 const [padTop, gap, padBot] = _wsmThumbCardVerticalInsets();
+                const lbl = _wsmThumbLabelReserveHeightPx();
+                const gapEff = lbl > 0 ? gap : 0;
                 const thumbH = this._childWidth * waFrame.height / waFrame.width;
-                const contentMin = padTop + thumbH + gap + WSM_THUMB_LABEL_RESERVE_PX + padBot;
+                const contentMin = padTop + thumbH + gapEff + lbl + padBot;
                 h = Math.ceil(contentMin);
             } else {
                 h = Math.round(this._childWidth * workArea.height / workArea.width / cw / ch);
@@ -1771,17 +1968,29 @@ class WorkspaceSwitcherPopupList extends St.Widget {
             this._childHeight = h;
             return [this._childHeight, this._childHeight];
         } else {
-            let w = Math.round(this._childHeight * workArea.width / workArea.height * cw / ch);
+            /* Cross-axis is WIDTH (workspace stack runs vertically). Legacy text-only formula tied width to
+             * tile height × monitor aspect — far narrower than the work area; raising Global scale (~110%)
+             * only inflated that estimate. Thumbnails should span the monitor width like horizontal mode. */
+            const themeNode = this.get_theme_node();
+            const ps = this._popScale > 0 ? this._popScale : 1;
+            const availCross = workArea.width - themeNode.get_horizontal_padding();
+            let w;
             if (thumbs) {
+                w = Math.floor(availCross * cw * ps);
+                w = Math.max(48, w);
                 const waFrame = _wsmThumbnailFrameWorkArea();
                 const [padTop, gap, padBot] = _wsmThumbCardVerticalInsets();
+                const lbl = _wsmThumbLabelReserveHeightPx();
+                const gapEff = lbl > 0 ? gap : 0;
                 const thumbH = w * waFrame.height / waFrame.width;
-                const needH = padTop + thumbH + gap + WSM_THUMB_LABEL_RESERVE_PX + padBot;
-                if (needH > this._childHeight) {
-                    const inner = this._childHeight - padTop - gap - WSM_THUMB_LABEL_RESERVE_PX - padBot;
+                const needH = padTop + thumbH + gapEff + lbl + padBot;
+                if (this._childHeight > 0 && needH > this._childHeight) {
+                    const inner = this._childHeight - padTop - gapEff - lbl - padBot;
                     const wMax = inner * waFrame.width / waFrame.height;
                     w = Math.min(w, Math.floor(wMax));
                 }
+            } else {
+                w = Math.round(this._childHeight * workArea.width / workArea.height * cw / ch);
             }
             this._childWidth = w;
             return [this._childWidth, this._childWidth];
@@ -1878,19 +2087,14 @@ const WorkspaceSwitcherPopupDefault = {
     },
 
     _setPopupPosition() {
-        let workArea;
-        if (this._monitorOption === 0)
-            workArea = global.display.get_monitor_geometry(Main.layoutManager.primaryIndex);
-        else
-            workArea = global.display.get_monitor_geometry(global.display.get_current_monitor());
-
-
-        let [, natHeight] = this.get_preferred_height(global.screen_width);
+        const wa = _wsmPopupAnchorWorkArea();
+        const forW = wa.width;
+        let [, natHeight] = this.get_preferred_height(forW);
         let [, natWidth] = this.get_preferred_width(natHeight);
         let h = this._horizontalPosition;
         let v = this._verticalPosition;
-        this.x = workArea.x + Math.floor((workArea.width - natWidth) * h);
-        this.y = workArea.y + Math.floor((workArea.height - natHeight) * v);
+        this.x = wa.x + Math.floor((wa.width - natWidth) * h);
+        this.y = wa.y + Math.floor((wa.height - natHeight) * v);
     },
 
     display(activeWorkspaceIndex) {

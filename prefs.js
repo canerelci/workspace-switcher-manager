@@ -248,11 +248,13 @@ Static - number of workspaces is fixed to the number you can set below.`),
     optionList.push(
         itemFactory.getRowWidget(
             _('Shortcut preset'),
-            _('More presets may be added in a future release.'),
+            _('Default uses Super+W and Super+Tab. If a key is already taken in Settings → Keyboard, change it there or pick another preset.'),
             itemFactory.newDropDown(),
             'pointerWorkspaceSelectHotkeyPreset',
             [
-                [_('Super + W'), 0],
+                [_('Super + W and Super + Tab'), 0],
+                [_('Super + W only'), 1],
+                [_('Super + Tab only'), 2],
             ],
             'pointerWorkspaceSelectEnabled'
         )
@@ -303,7 +305,9 @@ Static - number of workspaces is fixed to the number you can set below.`),
 
 function _syncPointerPresetAccelerator(opt) {
     const PRESETS = [
+        ['<Super>w', '<Super>Tab'],
         ['<Super>w'],
+        ['<Super>Tab'],
     ];
     const p = opt.get('pointerWorkspaceSelectHotkeyPreset');
     const accel = PRESETS[p] ?? PRESETS[0];

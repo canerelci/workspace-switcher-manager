@@ -25,11 +25,11 @@
     <key type="i" name="pointer-workspace-select-hotkey-preset">
       <default>0</default>
       <summary>Preset for pointer-select shortcut</summary>
-      <description>Reserved for future additional shortcuts; 0 means Super+W.</description>
+      <description>0 = Super+W and Super+Tab; 1 = Super+W only; 2 = Super+Tab only.</description>
     </key>
 
     <key type="as" name="pointer-workspace-select-accelerator">
-      <default><![CDATA[['<Super>w']]]></default>
+      <default><![CDATA[['<Super>w', '<Super>Tab']]]></default>
       <summary>Accelerator for pointer-select workspace popup</summary>
       <description>Keybinding that opens the workspace switcher for mouse selection (stored as an accelerator array).</description>
     </key>

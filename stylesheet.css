@@ -16,7 +16,12 @@
   border-radius: 10px;
   background-color: rgb(29, 29, 29);
   border: 1px solid;
-  border-color:  rgb(53, 53, 53);
+  border-color: rgb(28, 28, 28);
+  transition: border-color 120ms ease;
+}
+
+.workspace-switcher-container:hover {
+  border-color: rgb(53, 53, 53);
 }
 
 .workspace-switcher-custom {
@@ -33,7 +38,7 @@
   height: 50px;
   background-size: 32px;
   border: 1px solid;
-  border-color: rgb(53, 53, 53);
+  border-color: rgb(28, 28, 28);
   border-radius: 8px;
   color: white;
   transition: background-color 120ms ease, border-color 120ms ease;
@@ -65,9 +70,7 @@
 }
 
 .ws-switcher-active.wsm-pointer-hover {
-  filter: brightness(1.38) saturate(1.1);
-  box-shadow: 0 0 14px rgba(255, 255, 255, 0.55),
-              0 0 32px rgba(255, 255, 255, 0.28);
+  filter: brightness(1.1);
 }
 
 /* reverse padding */
@@ -103,9 +106,15 @@
 
 .wsm-workspace-thumbnail-clip {
   border-radius: 8px;
-  /* Inset “bezel” without stealing layout space from the clone */
-  box-shadow: inset 0 0 0 2px rgba(230, 232, 242, 0.78);
+  /* Inset bezel; clone is laid out WSM_THUMB_CLIP_INSET_PX inside each edge (extension.js). */
+  box-shadow: inset 0 0 0 2px rgba(230, 232, 242, 0.38);
   background-color: rgba(5, 5, 10, 0.94);
+  transition: box-shadow 120ms ease;
+}
+
+.workspace-switcher-custom.wsm-popup-workspace-thumbnails .ws-switcher-box:hover .wsm-workspace-thumbnail-clip,
+.workspace-switcher-custom.wsm-popup-workspace-thumbnails .ws-switcher-active:hover .wsm-workspace-thumbnail-clip {
+  box-shadow: inset 0 0 0 2px rgba(230, 232, 242, 0.82);
 }
 
 /* WorkspaceThumbnail uses style_class workspace-thumbnail; theme/overview rules can hide clones outside Overview */
