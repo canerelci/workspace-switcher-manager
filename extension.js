@@ -107,6 +107,18 @@ function _wsmBuildWindowStackIndices() {
 }
 
 /**
+ * Layout shrink factor alone makes labels tiny on wide layouts; scale gently with monitor short side.
+ */
+function _wsmEffectiveFontFit(list) {
+    const wa = _wsmWorkAreaForPopupSizing();
+    const shortSide = Math.min(wa.width, wa.height);
+    const fit = list._fitToScreenScale;
+    const ref = 1120;
+    const resBoost = Math.min(1.52, Math.max(0.9, shortSide / ref));
+    return fit * resBoost;
+}
+
+/**
  * WorkspaceThumbnail only draws windows on one monitor; pick the monitor with the most
  * taskbar-visible windows on this workspace (secondary monitor no longer yields empty tiles).
  */
@@ -1274,7 +1286,7 @@ const WorkspaceSwitcherPopupCustom = {
         let tileH = list._childHeight;
 
         if (!tileW || !tileH) {
-            const geoAspect = wa.width / wa.height * list._customWidthScale;
+            const geoAspect = wa.width / wa.height * (opt.get('popupWidthScale') / 100);
             const bh = this._boxHeight || Math.round(80 * this._popScale);
             tileH = bh;
             tileW = Math.round(bh * geoAspect);
@@ -1418,10 +1430,13 @@ const WorkspaceSwitcherPopupCustom = {
 
         const thumbLabels = opt.get('popupWorkspaceThumbnails');
         const labelFsBoost = thumbLabels ? 1.48 : 1;
+        const labelFit = _wsmEffectiveFontFit(this._list);
+        const padScale = opt.get('popupLabelPaddingScale') / 100;
+        const hPadEm = 0.5 * padScale;
 
         if (showIndex) {
             const text = `${wsIndex + 1}`;
-            const fontSize = this._popScale * this._indexScale * this._list._fitToScreenScale * labelFsBoost;
+            const fontSize = this._popScale * this._indexScale * labelFit * labelFsBoost;
             indexLabel = new St.Label({
                 x_align: Clutter.ActorAlign.CENTER,
                 y_align: Clutter.ActorAlign.CENTER,
@@ -1429,7 +1444,9 @@ const WorkspaceSwitcherPopupCustom = {
                         font-size: ${fontSize}em;
                         ${this._textBold ? 'font-weight: bold;' : ''}
                         ${this._textShadow ? textShadowStyle : ''}
-                        padding: 2px`,
+                        padding: 2px;
+                        padding-left: ${hPadEm}em;
+                        padding-right: ${hPadEm}em`,
                 text,
             });
         }
@@ -1456,7 +1473,7 @@ const WorkspaceSwitcherPopupCustom = {
 
         if (showTitle) {
             const winTitle = this._getWinTitle(wsIndex);
-            const fontSize = this._popScale * this._fontScale * 0.8 * this._list._fitToScreenScale * labelFsBoost;
+            const fontSize = this._popScale * this._fontScale * 0.8 * labelFit * labelFsBoost;
             if (winTitle && !text.split('\n').includes(winTitle)) {
                 titleLabel = new St.Label({
                     x_align: Clutter.ActorAlign.CENTER,
@@ -1466,14 +1483,14 @@ const WorkspaceSwitcherPopupCustom = {
                             ${this._textBold ? 'font-weight: bold;' : ''}
                             ${this._textShadow ? textShadowStyle : ''}
                             padding-top: 0.3em;
-                            padding-left: 0.5em;
-                            padding-right: 0.5em;`,
+                            padding-left: ${hPadEm}em;
+                            padding-right: ${hPadEm}em`,
                     text: winTitle,
                 });
             }
         }
 
-        let fontSize = this._popScale * this._fontScale * this._list._fitToScreenScale * labelFsBoost;
+        let fontSize = this._popScale * this._fontScale * labelFit * labelFsBoost;
         // if text is ordered but not delivered (no app name, no ws name) but ws index will be shown,
         // add an empty line to avoid index jumping during switching (at least when app name wrapping is disabled)
         if (this._popupMode === wsPopupMode.ACTIVE && (showName || showApp || showTitle) && showIndex && !text)
@@ -1488,8 +1505,8 @@ const WorkspaceSwitcherPopupCustom = {
                         ${this._textBold ? 'font-weight: bold;' : ''}
                         ${this._textShadow ? textShadowStyle : ''}
                         padding-top: 0.3em;
-                        padding-left: 0.5em;
-                        padding-right: 0.5em;`,
+                        padding-left: ${hPadEm}em;
+                        padding-right: ${hPadEm}em`,
                 text,
             });
         }
@@ -1635,7 +1652,6 @@ class WorkspaceSwitcherPopupList extends St.Widget {
         this._childHeight = 0;
         this._childWidth = 0;
         this._fitToScreenScale = 1;
-        this._customWidthScale = opt.get('popupWidthScale') / 100;
         let orientation = global.workspace_manager.layout_rows === -1;
         if (opt.get('reversePopupOrientation'))
             orientation = !orientation;
@@ -1660,13 +1676,15 @@ class WorkspaceSwitcherPopupList extends St.Widget {
         else
             availSize = workArea.height - themeNode.get_vertical_padding();
 
+        const cw = opt.get('popupWidthScale') / 100;
+
         let size = 0;
         for (let child of this.get_children()) {
             let [, childNaturalHeight] = child.get_preferred_height(-1);
             let height = childNaturalHeight * workArea.width / workArea.height * this._popScale;
 
             if (this._orientation === Clutter.Orientation.HORIZONTAL) // width scale option application
-                size += height * workArea.width / workArea.height * this._customWidthScale;
+                size += height * workArea.width / workArea.height * cw;
             else
                 size += height;
         }
@@ -1693,14 +1711,16 @@ class WorkspaceSwitcherPopupList extends St.Widget {
         let workArea = _wsmWorkAreaForPopupSizing();
         const thumbs = this.has_style_class_name('wsm-popup-workspace-thumbnails');
         const minSide = Math.round(WSM_THUMB_TILE_MIN_PX * (this._popScale ?? 1));
+        const cw = opt.get('popupWidthScale') / 100;
+        const ch = Math.max(0.18, opt.get('popupHeightScale') / 100);
 
         if (this._orientation === Clutter.Orientation.HORIZONTAL) {  // width scale option application
-            this._childHeight = Math.round(this._childWidth * workArea.height / workArea.width / this._customWidthScale);
+            this._childHeight = Math.round(this._childWidth * workArea.height / workArea.width / cw / ch);
             if (thumbs)
                 this._childHeight = Math.max(this._childHeight, minSide);
             return [this._childHeight, this._childHeight];
         } else {
-            this._childWidth = Math.round(this._childHeight * workArea.width / workArea.height * this._customWidthScale);
+            this._childWidth = Math.round(this._childHeight * workArea.width / workArea.height * cw / ch);
             if (thumbs)
                 this._childWidth = Math.max(this._childWidth, minSide);
             return [this._childWidth, this._childWidth];

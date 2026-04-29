@@ -80,6 +80,11 @@
     <key type="i" name="popup-width-scale">
       <default>100</default>
     </key>
+    <key type="i" name="popup-height-scale">
+      <default>100</default>
+      <summary>Workspace box height scale</summary>
+      <description>Adjusts vertical size of each workspace tile relative to width (100 matches width-derived ratio). Higher values shorten tiles; lower values make them taller.</description>
+    </key>
     <key type="i" name="popup-padding-scale">
       <default>100</default>
     </key>
@@ -95,6 +100,11 @@
     </key>
     <key type="i" name="index-scale">
       <default>100</default>
+    </key>
+    <key type="i" name="popup-label-padding-scale">
+      <default>55</default>
+      <summary>Workspace label horizontal padding</summary>
+      <description>Side padding inside workspace text as a percentage of the default (100 = original). Lower values give labels more width before wrapping.</description>
     </key>
 
     <key type="b" name="wrap-app-names">
@@ -193,6 +203,8 @@
         'textBold': 'true',
         'popupScale': '100',
         'popupWidthScale': '100',
+        'popupHeightScale': '100',
+        'popupLabelPaddingScale': '55',
         'popupPaddingScale': '100',
         'popupSpacingScale': '100',
         'popupRadiusScale': '100',
@@ -231,6 +243,8 @@
         'textBold': 'true',
         'popupScale': '66',
         'popupWidthScale': '133',
+        'popupHeightScale': '100',
+        'popupLabelPaddingScale': '55',
         'popupPaddingScale': '130',
         'popupSpacingScale': '180',
         'popupRadiusScale': '180',
@@ -269,6 +283,8 @@
         'textBold': 'false',
         'popupScale': '40',
         'popupWidthScale': '55',
+        'popupHeightScale': '100',
+        'popupLabelPaddingScale': '55',
         'popupPaddingScale': '250',
         'popupSpacingScale': '250',
         'popupRadiusScale': '700',
@@ -307,6 +323,8 @@
         'textBold': 'true',
         'popupScale': '530',
         'popupWidthScale': '150',
+        'popupHeightScale': '100',
+        'popupLabelPaddingScale': '55',
         'popupPaddingScale': '100',
         'popupSpacingScale': '100',
         'popupRadiusScale': '100',
@@ -345,6 +363,8 @@
         'textBold': 'true',
         'popupScale': '100',
         'popupWidthScale': '57',
+        'popupHeightScale': '100',
+        'popupLabelPaddingScale': '55',
         'popupPaddingScale': '200',
         'popupSpacingScale': '100',
         'popupRadiusScale': '700',

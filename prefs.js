@@ -612,6 +612,25 @@ function _getSizeTextOptionList(itemFactory) {
         )
     );
     // -----------------------------------------------------
+    const boxHeightAdjustment = new Gtk.Adjustment({
+        upper: 300,
+        lower: 10,
+        step_increment: 1,
+        page_increment: 1,
+    });
+
+    const boxHeight = itemFactory.newScale(boxHeightAdjustment);
+    boxHeight.add_mark(100, Gtk.PositionType.TOP, null);
+
+    optionList.push(
+        itemFactory.getRowWidget(
+            _('WS Box Height Scale (%)'),
+            _('Adjusts vertical size of each workspace tile relative to the width-derived ratio. Values above 100 shorten tiles (less empty space below thumbnails); below 100 make them taller'),
+            boxHeight,
+            'popupHeightScale'
+        )
+    );
+    // -----------------------------------------------------
     const paddingAdjustment = new Gtk.Adjustment({
         upper: 500,
         lower: 0,
@@ -689,7 +708,7 @@ function _getSizeTextOptionList(itemFactory) {
     optionList.push(
         itemFactory.getRowWidget(
             _('Font Size Scale (%)'),
-            _('Size resizes according to the pop-up scale, use this scale to precisely adjust the text size'),
+            _('Base text size relative to pop-up scale; size also scales gently with display resolution'),
             fsScale,
             'fontScale'
         )
@@ -711,6 +730,25 @@ function _getSizeTextOptionList(itemFactory) {
             _('If only "Show Workspace Index" text (or "Show App Name" on workspace without app) content option is active this scale takes effect. Single digit always looks smaller then longer text with the same font size'),
             idxScale,
             'indexScale'
+        )
+    );
+    // -----------------------------------------------------
+    const labelPadAdjustment = new Gtk.Adjustment({
+        lower: 10,
+        upper: 150,
+        step_increment: 1,
+        page_increment: 5,
+    });
+
+    const labelPad = itemFactory.newScale(labelPadAdjustment);
+    labelPad.add_mark(100, Gtk.PositionType.TOP, null);
+
+    optionList.push(
+        itemFactory.getRowWidget(
+            _('Label side padding (%)'),
+            _('Horizontal padding for workspace text inside each box, as a percentage of the default (100 = original). Lower values widen the text area and reduce early line wrapping'),
+            labelPad,
+            'popupLabelPaddingScale'
         )
     );
     // -----------------------------------------------------
